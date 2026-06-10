@@ -1,5 +1,6 @@
-// Admin App API service helper
-const API_BASE_URL = ''; // Routed via Vite proxy to port 5000
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+    ? '' 
+    : 'https://ubackend-guk8.onrender.com';
 
 async function request(endpoint, options = {}) {
     const token = localStorage.getItem('uclose_admin_token') || sessionStorage.getItem('uclose_admin_token');
