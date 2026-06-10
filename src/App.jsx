@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from './services/api';
+import { api, API_BASE_URL } from './services/api';
 import './App.css';
 
 const playNotificationSound = () => {
@@ -308,7 +308,7 @@ function App() {
     if (!token) return;
 
     console.log('[SSE] Connecting to order notifications stream...');
-    const eventSource = new EventSource(`/api/admin/order-stream?token=${token}`);
+    const eventSource = new EventSource(`${API_BASE_URL}/api/admin/order-stream?token=${token}`);
 
     eventSource.addEventListener('new-order', (event) => {
       try {
@@ -1941,7 +1941,7 @@ function App() {
                                     fontSize="9"
                                     fontWeight="700"
                                     letterSpacing="0.5"
-                                    textTransform="uppercase"
+                                    style={{ textTransform: 'uppercase' }}
                                   >
                                     {d.dateStr}
                                   </text>
@@ -2227,7 +2227,7 @@ function App() {
                                       fontSize="8"
                                       fontWeight="700"
                                       letterSpacing="0.5"
-                                      textTransform="uppercase"
+                                      style={{ textTransform: 'uppercase' }}
                                     >
                                       {p.dateStr.split('-').slice(1).join('/')}
                                     </text>
