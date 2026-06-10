@@ -308,5 +308,13 @@ export const api = {
     deleteMedia: (filename) =>
         request(`/api/admin/media/${filename}`, {
             method: 'DELETE'
-        })
+        }),
+
+    logout: () =>
+        request('/api/auth/logout', {
+            method: 'POST'
+        }),
+
+    getLiveActivities: () =>
+        request('/api/admin/live-activities')
 };

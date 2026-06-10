@@ -503,6 +503,99 @@ function App() {
       }
     });
 
+    eventSource.addEventListener('login', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received login event:', data);
+        
+        const activity = {
+          id: `login-${Date.now()}`,
+          type: 'login',
+          name: data.role === 'admin' ? 'Admin Login' : 'User Login',
+          message: `${data.name} (${data.email}) logged in.`,
+          time: data.time || new Date().toISOString(),
+          color: '#8b5cf6',
+          icon: '🔑'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
+        playNotificationSound();
+
+        setActiveNotification({
+          type: 'login',
+          name: data.name,
+          email: data.email,
+          role: data.role
+        });
+        setIsDismissingNotification(false);
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse login event:', err.message);
+      }
+    });
+
+    eventSource.addEventListener('logout', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received logout event:', data);
+        
+        const activity = {
+          id: `logout-${Date.now()}`,
+          type: 'logout',
+          name: data.role === 'admin' ? 'Admin Logout' : 'User Logout',
+          message: `${data.name} (${data.email}) logged out.`,
+          time: data.time || new Date().toISOString(),
+          color: '#ef4444',
+          icon: '🚪'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
+        playNotificationSound();
+
+        setActiveNotification({
+          type: 'logout_event',
+          name: data.name,
+          email: data.email,
+          role: data.role
+        });
+        setIsDismissingNotification(false);
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse logout event:', err.message);
+      }
+    });
+
+    eventSource.addEventListener('password-changed', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received password-changed event:', data);
+        
+        const activity = {
+          id: `password-${Date.now()}`,
+          type: 'password-changed',
+          name: data.role === 'admin' ? 'Admin Password Changed' : 'User Password Changed',
+          message: `${data.name} (${data.email}) changed their password.`,
+          time: data.time || new Date().toISOString(),
+          color: '#f43f5e',
+          icon: '🔒'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
+        playNotificationSound();
+
+        setActiveNotification({
+          type: 'password-changed',
+          name: data.name,
+          email: data.email,
+          role: data.role
+        });
+        setIsDismissingNotification(false);
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse password-changed event:', err.message);
+      }
+    });
+
     eventSource.onerror = (err) => {
       console.error('[SSE] EventSource connection error:', err);
     };
@@ -676,6 +769,14 @@ function App() {
       setReviews(reviewsData || []);
     } catch (reviewsErr) {
       console.error('Failed to load reviews:', reviewsErr.message);
+    }
+
+    // Fetch live activities
+    try {
+      const liveData = await api.getLiveActivities();
+      setLiveActivities(Array.isArray(liveData) ? liveData : []);
+    } catch (liveErr) {
+      console.error('Failed to load live activities:', liveErr.message);
     }
 
     setDataLoading(false);
@@ -1754,7 +1855,12 @@ function App() {
     setShowLogoutConfirm(true);
   };
 
-  const performLogout = () => {
+  const performLogout = async () => {
+    try {
+      await api.logout();
+    } catch (err) {
+      console.error('Failed to notify backend of logout:', err.message);
+    }
     localStorage.removeItem('uclose_admin_token');
     localStorage.removeItem('uclose_admin_last_close');
     setUser(null);
@@ -5934,6 +6040,49 @@ function App() {
               </div>
               <div className="notification-actions">
                 <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#3b82f6' }}>OK</button>
+              </div>
+            </>
+          ) : activeNotification.type === 'login' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#8b5cf6' }}>Session Alert</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">{activeNotification.role === 'admin' ? 'Admin Login' : 'User Login'}</h4>
+              <div className="notification-body">
+                <strong>{activeNotification.name}</strong> ({activeNotification.email}) logged in.
+              </div>
+              <div className="notification-actions">
+                <button onClick={() => { setActiveTab(activeNotification.role === 'admin' ? 'overview' : 'users'); dismissNotification(); }} className="notification-btn-view" style={{ backgroundColor: '#8b5cf6' }}>View</button>
+                <button onClick={dismissNotification} className="notification-btn-dismiss">Dismiss</button>
+              </div>
+            </>
+          ) : activeNotification.type === 'logout_event' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#ef4444' }}>Session Alert</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">{activeNotification.role === 'admin' ? 'Admin Logout' : 'User Logout'}</h4>
+              <div className="notification-body">
+                <strong>{activeNotification.name}</strong> ({activeNotification.email}) logged out.
+              </div>
+              <div className="notification-actions">
+                <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#ef4444' }}>OK</button>
+              </div>
+            </>
+          ) : activeNotification.type === 'password-changed' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#f43f5e' }}>Security Alert</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">Password Changed!</h4>
+              <div className="notification-body">
+                <strong>{activeNotification.name}</strong> ({activeNotification.email}) updated their password.
+              </div>
+              <div className="notification-actions">
+                <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#f43f5e' }}>OK</button>
               </div>
             </>
           ) : activeNotification.type === 'user-registered' ? (
