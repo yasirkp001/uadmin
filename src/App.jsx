@@ -1873,7 +1873,7 @@ function App() {
                     })()}
 
                     {/* Charts Grid */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                    <div className="dashboard-charts-grid">
                       
                       {/* Sales Trend SVG Chart */}
                       <div className="welcome-banner" style={{ margin: 0, padding: '24px' }}>
@@ -2126,7 +2126,7 @@ function App() {
                     </div>
 
                     {/* Charts & Leaderboard Row */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1.8fr 1.2fr', gap: '32px', marginBottom: '32px' }}>
+                    <div className="analytics-charts-grid">
                       
                       {/* Trend Area Chart Card */}
                       <div className="welcome-banner" style={{ margin: 0, padding: '24px' }}>
@@ -2287,11 +2287,11 @@ function App() {
                       </button>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '3fr 1.2fr', gap: '32px', alignItems: 'start' }}>
+                    <div className="products-catalog-grid">
                       {/* Left Column: Products List */}
                       <div>
                         {/* Inventory Filters */}
-                        <div className="filter-bar" style={{ display: 'flex', gap: '16px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                        <div className="filter-bar">
                           <div>
                             <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Category Filter</label>
                             <select
@@ -3005,7 +3005,7 @@ function App() {
                         {editingGuideId ? 'Edit Size Guide' : 'Create Size Guide'}
                       </h2>
                       <form onSubmit={handleGuideSubmit}>
-                        <div className="grid-2col" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                        <div className="grid-2col">
                           <div className="form-group">
                             <label className="form-label">Size Guide Name</label>
                             <input
@@ -3327,7 +3327,7 @@ function App() {
                   <form onSubmit={handleSettingsSubmit} className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
                     <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>General Branding</h2>
                     
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                    <div className="grid-3col">
                       <div className="form-group">
                         <label className="form-label">Store Name</label>
                         <input
@@ -3419,7 +3419,7 @@ function App() {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                    <div className="grid-2col">
                       <div className="form-group">
                         <label className="form-label">Hero Title Banner</label>
                         <input
@@ -3444,7 +3444,7 @@ function App() {
 
                     <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', marginTop: '32px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>Contact Details & Social Media Links</h2>
                     
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                    <div className="grid-2col">
                       <div className="form-group">
                         <label className="form-label">Support Email Address</label>
                         <input
@@ -3469,7 +3469,7 @@ function App() {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                    <div className="grid-2col">
                       <div className="form-group">
                         <label className="form-label">Instagram Profile Link</label>
                         <input
@@ -3900,7 +3900,7 @@ function App() {
               </div>
 
               {/* Billing vs Shipping details grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '32px', fontSize: '12px' }}>
+              <div className="grid-2col" style={{ marginBottom: '32px', fontSize: '12px' }}>
                 <div>
                   <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)', marginBottom: '6px' }}>Bill To (Buyer)</div>
                   <div style={{ fontWeight: '600' }}>{selectedOrder.shippingDetails?.name}</div>
