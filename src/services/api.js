@@ -134,6 +134,15 @@ export const api = {
             method: 'DELETE'
         }),
 
+    // Live customer carts
+    getAdminCarts: () =>
+        request('/api/admin/carts'),
+
+    deleteUser: (userId) =>
+        request(`/api/admin/users/${userId}`, {
+            method: 'DELETE'
+        }),
+
     // User status and history
     toggleUserStatus: (userId) =>
         request(`/api/admin/users/${userId}/toggle-status`, {

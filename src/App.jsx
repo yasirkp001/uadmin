@@ -99,6 +99,12 @@ function App() {
   // Product catalog search state
   const [productSearchQuery, setProductSearchQuery] = useState('');
 
+  // Users tab search state
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  // Live customer carts state
+  const [liveCarts, setLiveCarts] = useState([]);
+
   // Admin password change state
   const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
   const [passwordSaving, setPasswordSaving] = useState(false);
@@ -771,6 +777,22 @@ function App() {
       console.error('Failed to load reviews:', reviewsErr.message);
     }
 
+    // Fetch live customer carts
+    try {
+      const cartsData = await api.getAdminCarts();
+      setLiveCarts(Array.isArray(cartsData) ? cartsData : []);
+    } catch (cartsErr) {
+      console.error('Failed to load live carts:', cartsErr.message);
+    }
+
+    // Fetch admin activity log (for overview widget & activity tab)
+    try {
+      const activityData = await api.getActivityLog();
+      setActivityLog(Array.isArray(activityData) ? activityData : []);
+    } catch (activityErr) {
+      console.error('Failed to load activity log:', activityErr.message);
+    }
+
     // Fetch live activities
     try {
       const liveData = await api.getLiveActivities();
@@ -1174,6 +1196,34 @@ function App() {
     const link = document.createElement('a');
     link.setAttribute('href', url);
     link.setAttribute('download', `customer_list_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportProductsToCSV = () => {
+    if (products.length === 0) {
+      alert('No products available to export.');
+      return;
+    }
+    const headers = ['Product ID', 'Name', 'Category', 'Price', 'Stock', 'Sizes', 'Description'];
+    const rows = products.map(p => [
+      p.id,
+      `"${(p.name || '').replace(/"/g, '""')}"`,
+      p.category || '',
+      `$${parseFloat(p.price || 0).toFixed(2)}`,
+      p.stock !== undefined ? p.stock : '',
+      `"${Array.isArray(p.sizes) ? p.sizes.join(' / ') : (p.sizes || '')}"`,
+      `"${(p.description || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `product_catalog_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -2075,6 +2125,50 @@ function App() {
       loadDashboardData();
     } catch (err) {
       alert('Failed to delete product: ' + err.message);
+    }
+  };
+
+  // Clone an existing product as a new catalog entry
+  const handleDuplicateProduct = async (product) => {
+    try {
+      const images = product.images
+        ? (typeof product.images === 'string' ? JSON.parse(product.images) : product.images)
+        : [product.image];
+      let details = [];
+      if (product.details) {
+        try {
+          const parsed = typeof product.details === 'string' ? JSON.parse(product.details) : product.details;
+          if (Array.isArray(parsed)) details = parsed;
+        } catch {
+          details = [];
+        }
+      }
+      await api.createProduct({
+        name: `${product.name} (Copy)`,
+        price: product.price,
+        category: product.category,
+        image: product.image,
+        images: Array.isArray(images) ? images : [product.image],
+        description: product.description || '',
+        details,
+        care: product.care || '',
+        stock: product.stock !== undefined ? product.stock : 50,
+        sizes: Array.isArray(product.sizes) ? product.sizes : ['S', 'M', 'L', 'XL', 'XXL']
+      });
+      loadDashboardData();
+    } catch (err) {
+      alert('Failed to duplicate product: ' + err.message);
+    }
+  };
+
+  // Permanently delete a customer account
+  const handleDeleteUser = async (u) => {
+    if (!window.confirm(`Permanently delete customer "${u.name}" (${u.email})? Their order history will be kept, but the account and cart will be removed. This cannot be undone.`)) return;
+    try {
+      await api.deleteUser(u.id);
+      setUsers(users.filter(usr => usr.id !== u.id));
+    } catch (err) {
+      alert('Failed to delete customer: ' + err.message);
     }
   };
 
