@@ -1,6 +1,38 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { api } from './services/api';
 import './App.css';
+
+const playNotificationSound = () => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    
+    const playTone = (freq, startTime, duration) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      
+      gain.gain.setValueAtTime(0.08, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    };
+
+    const now = ctx.currentTime;
+    // Chime: C5 followed by G5
+    playTone(523.25, now, 0.15);
+    playTone(783.99, now + 0.12, 0.35);
+  } catch (e) {
+    console.error('Audio playback failed:', e.message);
+  }
+};
 
 function App() {
   // Auth state
@@ -101,9 +133,74 @@ function App() {
     hero_title: '',
     hero_tagline: '',
     hero_image: '',
-    announcement_banner: ''
+    announcement_banner: '',
+    social_instagram: '',
+    social_facebook: '',
+    contact_email: '',
+    contact_phone: '',
+    maintenance_mode: 'false',
+    star_color: '#fbbf24'
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
+
+  // Admin profile settings states
+  const [profileForm, setProfileForm] = useState({
+    name: '',
+    phone: '',
+    dp: ''
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileUploadLoading, setProfileUploadLoading] = useState(false);
+
+  // State for user edit modal
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({
+    name: '',
+    phone: '',
+    dp: ''
+  });
+  const [editUserSaving, setEditUserSaving] = useState(false);
+  const [editUserUploadLoading, setEditUserUploadLoading] = useState(false);
+
+  // State for Add Admin Modal
+  const [showAddAdminModal, setShowAddAdminModal] = useState(false);
+  const [addAdminForm, setAddAdminForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    dp: ''
+  });
+  const [addAdminSaving, setAddAdminSaving] = useState(false);
+  const [addAdminUploadLoading, setAddAdminUploadLoading] = useState(false);
+
+  // State for Add Customer Modal
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [addCustomerForm, setAddCustomerForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    phone: '',
+    dp: ''
+  });
+  const [addCustomerSaving, setAddCustomerSaving] = useState(false);
+  const [addCustomerUploadLoading, setAddCustomerUploadLoading] = useState(false);
+
+  // State for Site Settings Hero Image Upload
+  const [heroImageUploadLoading, setHeroImageUploadLoading] = useState(false);
+
+  // Sync admin details to profile form state
+  useEffect(() => {
+    if (user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setProfileForm({
+        name: user.name || '',
+        phone: user.phone || '',
+        dp: user.dp || ''
+      });
+    }
+  }, [user]);
 
   // Size Guides Management states
   const [sizeGuides, setSizeGuides] = useState([]);
@@ -119,6 +216,34 @@ function App() {
     XL: ['', '', ''],
     XXL: ['', '', '']
   });
+
+  // Real-time notifications state
+  const [activeNotification, setActiveNotification] = useState(null);
+  const [isDismissingNotification, setIsDismissingNotification] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  // Blog states
+  const [posts, setPosts] = useState([]);
+  const [showBlogModal, setShowBlogModal] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
+  const [blogForm, setBlogForm] = useState({ title: '', content: '', author: '' });
+  const [blogSubmitting, setBlogSubmitting] = useState(false);
+
+  // Reviews states
+  const [reviews, setReviews] = useState([]);
+  const [showReviewEditModal, setShowReviewEditModal] = useState(false);
+  const [editingReview, setEditingReview] = useState(null);
+  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  // Global JS error logger for debugging client crashes
+  useEffect(() => {
+    const handleError = (event) => {
+      alert(`JS Error: ${event.message}\nAt: ${event.filename}:${event.lineno}`);
+    };
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
 
   // Verify auth on mount - keep session logged in on refresh
   useEffect(() => {
@@ -175,6 +300,68 @@ function App() {
     checkAuth();
   }, []);
 
+  // Connect to real-time purchase notification stream (SSE)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const token = localStorage.getItem('uclose_admin_token') || sessionStorage.getItem('uclose_admin_token');
+    if (!token) return;
+
+    console.log('[SSE] Connecting to order notifications stream...');
+    const eventSource = new EventSource(`/api/admin/order-stream?token=${token}`);
+
+    eventSource.addEventListener('new-order', (event) => {
+      try {
+        const orderData = JSON.parse(event.data);
+        console.log('[SSE] Received new order event:', orderData);
+        
+        // Play chime sound
+        playNotificationSound();
+
+        // Show toast
+        setActiveNotification(orderData);
+        setIsDismissingNotification(false);
+
+        // Auto-refresh stats and orders to keep dashboard up to date
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse new order event:', err.message);
+      }
+    });
+
+    eventSource.onerror = (err) => {
+      console.error('[SSE] EventSource connection error:', err);
+    };
+
+    return () => {
+      console.log('[SSE] Disconnecting event source...');
+      eventSource.close();
+    };
+  }, [isAuthenticated]);
+
+  const dismissNotification = () => {
+    setIsDismissingNotification(true);
+    setTimeout(() => {
+      setActiveNotification(null);
+      setIsDismissingNotification(false);
+    }, 300);
+  };
+
+  const handleViewNotificationOrder = () => {
+    if (!activeNotification) return;
+    const orderId = activeNotification.id;
+    setIsDismissingNotification(true);
+    setTimeout(() => {
+      setActiveNotification(null);
+      setIsDismissingNotification(false);
+      
+      // Navigate to orders tab
+      setActiveTab('orders');
+      // Pre-fill search query with the new order ID to highlight it
+      setOrderSearchQuery(orderId);
+    }, 300);
+  };
+
   // Save close timestamp on tab/browser close or refresh
   useEffect(() => {
     const handleUnload = () => {
@@ -191,64 +378,118 @@ function App() {
   }, []);
 
   // Load Dashboard Data
-  const loadDashboardData = async () => {
+  async function loadDashboardData() {
     setDataLoading(true);
+    
+    // Fetch stats
     try {
       const statsData = await api.getAdminStats();
-      setStats(statsData);
-
-      const productsData = await api.getProducts();
-      setProducts(productsData);
-
-      const ordersData = await api.getAdminOrders();
-      setOrders(ordersData);
-
-      const usersData = await api.getAdminUsers();
-      setUsers(usersData);
-
-      const couponsData = await api.getCoupons();
-      setCoupons(couponsData);
-
-      try {
-        const categoriesData = await api.getCategories();
-        setCategories(categoriesData);
-      } catch (catErr) {
-        console.error('Failed to load categories:', catErr.message);
-      }
-
-      try {
-        const analytics = await api.getAdminAnalytics();
-        setAnalyticsData(analytics);
-      } catch (analyticsErr) {
-        console.error('Failed to load analytics data:', analyticsErr.message);
-      }
- 
-      try {
-        const supportData = await api.getSupportTickets();
-        setSupportTickets(supportData);
-      } catch (supportErr) {
-        console.error('Failed to load support tickets:', supportErr.message);
-      }
-
-      try {
-        const settingsData = await api.getSettings();
-        setSiteSettings(settingsData);
-      } catch (settingsErr) {
-        console.error('Failed to load site settings:', settingsErr.message);
-      }
-
-      try {
-        const guides = await api.getSizeGuides();
-        setSizeGuides(guides);
-      } catch (guidesErr) {
-        console.error('Failed to load size guides:', guidesErr.message);
-      }
+      setStats(statsData || { totalSales: 0, totalOrders: 0, totalUsers: 0, totalProducts: 0 });
     } catch (err) {
-      console.error('Failed to load admin dashboard data:', err.message);
-    } finally {
-      setDataLoading(false);
+      console.error('Failed to load admin stats:', err.message);
     }
-  };
+
+    // Fetch products
+    try {
+      const productsData = await api.getProducts();
+      setProducts(Array.isArray(productsData) ? productsData : []);
+    } catch (err) {
+      console.error('Failed to load products:', err.message);
+    }
+
+    // Fetch orders
+    try {
+      const ordersData = await api.getAdminOrders();
+      setOrders(Array.isArray(ordersData) ? ordersData : []);
+    } catch (err) {
+      console.error('Failed to load admin orders:', err.message);
+    }
+
+    // Fetch users
+    try {
+      const usersData = await api.getAdminUsers();
+      setUsers(Array.isArray(usersData) ? usersData : []);
+    } catch (err) {
+      console.error('Failed to load admin users:', err.message);
+    }
+
+    // Fetch coupons
+    try {
+      const couponsData = await api.getCoupons();
+      setCoupons(Array.isArray(couponsData) ? couponsData : []);
+    } catch (err) {
+      console.error('Failed to load coupons:', err.message);
+    }
+
+    // Fetch categories
+    try {
+      const categoriesData = await api.getCategories();
+      setCategories(Array.isArray(categoriesData) ? categoriesData : []);
+    } catch (catErr) {
+      console.error('Failed to load categories:', catErr.message);
+    }
+
+    // Fetch analytics
+    try {
+      const analytics = await api.getAdminAnalytics();
+      setAnalyticsData(analytics);
+    } catch (analyticsErr) {
+      console.error('Failed to load analytics data:', analyticsErr.message);
+    }
+ 
+    // Fetch support tickets
+    try {
+      const supportData = await api.getSupportTickets();
+      setSupportTickets(Array.isArray(supportData) ? supportData : []);
+    } catch (supportErr) {
+      console.error('Failed to load support tickets:', supportErr.message);
+    }
+
+    // Fetch settings
+    try {
+      const settingsData = await api.getSettings();
+      setSiteSettings(settingsData || {
+        site_name: '',
+        hero_title: '',
+        hero_tagline: '',
+        hero_image: '',
+        announcement_banner: '',
+        social_instagram: '',
+        social_facebook: '',
+        contact_email: '',
+        contact_phone: '',
+        maintenance_mode: 'false'
+      });
+    } catch (settingsErr) {
+      console.error('Failed to load site settings:', settingsErr.message);
+    }
+
+    // Fetch size guides
+    try {
+      const guides = await api.getSizeGuides();
+      setSizeGuides(Array.isArray(guides) ? guides : []);
+    } catch (guidesErr) {
+      console.error('Failed to load size guides:', guidesErr.message);
+    }
+
+    // Fetch posts
+    try {
+      const postsData = await api.getPosts();
+      setPosts(postsData.posts || []);
+    } catch (postsErr) {
+      console.error('Failed to load posts:', postsErr.message);
+    }
+
+    // Fetch reviews
+    try {
+      const reviewsData = await api.getReviews();
+      setReviews(reviewsData || []);
+    } catch (reviewsErr) {
+      console.error('Failed to load reviews:', reviewsErr.message);
+    }
+
+    setDataLoading(false);
+  }
 
   const handleSettingsSubmit = async (e) => {
     e.preventDefault();
@@ -263,12 +504,397 @@ function App() {
     }
   };
 
+  // Admin profile settings submission and upload
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    if (!profileForm.name.trim()) {
+      alert('Name is required.');
+      return;
+    }
+    setProfileSaving(true);
+    try {
+      await api.updateProfileDetails(
+        profileForm.name.trim(),
+        profileForm.phone.trim(),
+        profileForm.dp.trim()
+      );
+      // Refresh local admin profile info
+      const data = await api.getMe();
+      if (data.user) {
+        setUser(data.user);
+      }
+      alert('Profile details updated successfully!');
+    } catch (err) {
+      alert('Failed to update profile: ' + err.message);
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleAdminAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setProfileUploadLoading(true);
+    try {
+      const data = await api.uploadImage(file);
+      setProfileForm(prev => ({ ...prev, dp: data.imageUrl }));
+    } catch (err) {
+      alert('Failed to upload image: ' + err.message);
+    } finally {
+      setProfileUploadLoading(false);
+    }
+  };
+
+  // Add Admin modal functions
+  const openAddAdminModal = () => {
+    setAddAdminForm({
+      name: '',
+      email: '',
+      password: '',
+      phone: '',
+      dp: ''
+    });
+    setShowAddAdminModal(true);
+  };
+
+  const handleAddAdminSubmit = async (e) => {
+    e.preventDefault();
+    if (!addAdminForm.name.trim() || !addAdminForm.email.trim() || !addAdminForm.password.trim()) {
+      alert('Name, email, and password are required.');
+      return;
+    }
+    setAddAdminSaving(true);
+    try {
+      await api.createAdmin({
+        name: addAdminForm.name.trim(),
+        email: addAdminForm.email.trim(),
+        password: addAdminForm.password,
+        phone: addAdminForm.phone.trim(),
+        dp: addAdminForm.dp.trim()
+      });
+      setShowAddAdminModal(false);
+      // Refresh the users database listing
+      const usersData = await api.getAdminUsers();
+      setUsers(Array.isArray(usersData) ? usersData : []);
+      alert('New administrator account created successfully!');
+    } catch (err) {
+      alert('Failed to create administrator: ' + err.message);
+    } finally {
+      setAddAdminSaving(false);
+    }
+  };
+
+  const handleAddAdminAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAddAdminUploadLoading(true);
+    try {
+      const data = await api.uploadImage(file);
+      setAddAdminForm(prev => ({ ...prev, dp: data.imageUrl }));
+    } catch (err) {
+      alert('Failed to upload image: ' + err.message);
+    } finally {
+      setAddAdminUploadLoading(false);
+    }
+  };
+
+  // Add Customer modal functions
+  const openAddCustomerModal = () => {
+    setAddCustomerForm({
+      name: '',
+      email: '',
+      password: '',
+      phone: '',
+      dp: ''
+    });
+    setShowAddCustomerModal(true);
+  };
+
+  const handleAddCustomerSubmit = async (e) => {
+    e.preventDefault();
+    if (!addCustomerForm.name.trim() || !addCustomerForm.email.trim() || !addCustomerForm.password.trim()) {
+      alert('Name, email, and password are required.');
+      return;
+    }
+    setAddCustomerSaving(true);
+    try {
+      await api.createCustomer({
+        name: addCustomerForm.name.trim(),
+        email: addCustomerForm.email.trim(),
+        password: addCustomerForm.password,
+        phone: addCustomerForm.phone.trim(),
+        dp: addCustomerForm.dp.trim()
+      });
+      setShowAddCustomerModal(false);
+      // Refresh the users database listing
+      const usersData = await api.getAdminUsers();
+      setUsers(Array.isArray(usersData) ? usersData : []);
+      alert('New customer account created successfully!');
+    } catch (err) {
+      alert('Failed to create customer: ' + err.message);
+    } finally {
+      setAddCustomerSaving(false);
+    }
+  };
+
+  const handleAddCustomerAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setAddCustomerUploadLoading(true);
+    try {
+      const data = await api.uploadImage(file);
+      setAddCustomerForm(prev => ({ ...prev, dp: data.imageUrl }));
+    } catch (err) {
+      alert('Failed to upload image: ' + err.message);
+    } finally {
+      setAddCustomerUploadLoading(false);
+    }
+  };
+
+  // Customer account edit modal functions
+  const openEditUserModal = (customer) => {
+    setEditingCustomer(customer);
+    setEditUserForm({
+      name: customer.name || '',
+      phone: customer.phone || '',
+      dp: customer.dp || ''
+    });
+    setShowEditUserModal(true);
+  };
+
+  const handleEditUserSubmit = async (e) => {
+    e.preventDefault();
+    if (!editUserForm.name.trim()) {
+      alert('Name is required.');
+      return;
+    }
+    setEditUserSaving(true);
+    try {
+      await api.updateUser(editingCustomer.id, {
+        name: editUserForm.name.trim(),
+        phone: editUserForm.phone.trim(),
+        dp: editUserForm.dp.trim()
+      });
+      setShowEditUserModal(false);
+      // Refresh the customer database listing
+      const usersData = await api.getAdminUsers();
+      setUsers(Array.isArray(usersData) ? usersData : []);
+      alert('User details updated successfully!');
+    } catch (err) {
+      alert('Failed to update user: ' + err.message);
+    } finally {
+      setEditUserSaving(false);
+    }
+  };
+
+  const handleEditUserAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setEditUserUploadLoading(true);
+    try {
+      const data = await api.uploadImage(file);
+      setEditUserForm(prev => ({ ...prev, dp: data.imageUrl }));
+    } catch (err) {
+      alert('Failed to upload image: ' + err.message);
+    } finally {
+      setEditUserUploadLoading(false);
+    }
+  };
+
+  // Hero Image file uploader
+  const handleHeroImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setHeroImageUploadLoading(true);
+    try {
+      const data = await api.uploadImage(file);
+      setSiteSettings(prev => ({ ...prev, hero_image: data.imageUrl }));
+    } catch (err) {
+      alert('Failed to upload hero image: ' + err.message);
+    } finally {
+      setHeroImageUploadLoading(false);
+    }
+  };
+
+  // Blog Handlers
+  const handleStartCreatePost = () => {
+    setEditingPost(null);
+    setBlogForm({ title: '', content: '', author: user?.name || 'Admin' });
+    setShowBlogModal(true);
+  };
+
+  const handleStartEditPost = (post) => {
+    setEditingPost(post.id);
+    setBlogForm({ title: post.title, content: post.content, author: post.author });
+    setShowBlogModal(true);
+  };
+
+  const handleBlogSubmit = async (e) => {
+    e.preventDefault();
+    if (!blogForm.title.trim() || !blogForm.content.trim()) {
+      alert('Title and Content are required!');
+      return;
+    }
+    setBlogSubmitting(true);
+    try {
+      if (editingPost) {
+        await api.updatePost(editingPost, blogForm);
+        alert('Blog post updated successfully!');
+      } else {
+        await api.createPost(blogForm);
+        alert('Blog post created successfully!');
+      }
+      setShowBlogModal(false);
+      const postsRes = await api.getPosts();
+      setPosts(postsRes.posts || []);
+    } catch (err) {
+      alert('Failed to save post: ' + err.message);
+    } finally {
+      setBlogSubmitting(false);
+    }
+  };
+
+  const handleDeletePost = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this blog post?')) return;
+    try {
+      await api.deletePost(id);
+      alert('Blog post deleted.');
+      const postsRes = await api.getPosts();
+      setPosts(postsRes.posts || []);
+    } catch (err) {
+      alert('Failed to delete post: ' + err.message);
+    }
+  };
+
+  // Review Handlers
+  const handleApproveReview = async (id) => {
+    try {
+      await api.approveReview(id);
+      alert('Review approved successfully!');
+      const reviewsData = await api.getReviews();
+      setReviews(reviewsData || []);
+    } catch (err) {
+      alert('Failed to approve review: ' + err.message);
+    }
+  };
+
+  const handleDeleteReview = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this review?')) return;
+    try {
+      await api.deleteReview(id);
+      alert('Review deleted.');
+      const reviewsData = await api.getReviews();
+      setReviews(reviewsData || []);
+    } catch (err) {
+      alert('Failed to delete review: ' + err.message);
+    }
+  };
+
+  const handleOpenEditReview = (review) => {
+    setEditingReview(review);
+    setReviewForm({ rating: review.rating, comment: review.comment });
+    setShowReviewEditModal(true);
+  };
+
+  const handleUpdateReviewSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingReview) return;
+    setReviewSubmitting(true);
+    try {
+      await api.updateReview(editingReview.id, {
+        rating: reviewForm.rating,
+        comment: reviewForm.comment
+      });
+      alert('Review updated successfully!');
+      setShowReviewEditModal(false);
+      setEditingReview(null);
+      const reviewsData = await api.getReviews();
+      setReviews(reviewsData || []);
+    } catch (err) {
+      alert('Failed to update review: ' + err.message);
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  // CSV Report Exports
+  const exportOrdersToCSV = () => {
+    if (orders.length === 0) {
+      alert('No orders available to export.');
+      return;
+    }
+    const headers = ['Order ID', 'Customer Name', 'Email', 'Phone', 'Date', 'Total Amount', 'Status', 'Address', 'Items Count'];
+    const rows = orders.map(o => {
+      const itemsCount = o.items ? o.items.reduce((sum, item) => sum + (item.quantity || 1), 0) : 0;
+      return [
+        o.id,
+        o.shippingDetails?.name || '',
+        o.shippingDetails?.email || '',
+        o.shippingDetails?.phone || '',
+        new Date(o.date).toLocaleDateString(),
+        `$${parseFloat(o.total || 0).toFixed(2)}`,
+        o.status,
+        `"${(o.shippingDetails?.address || '').replace(/"/g, '""')}"`,
+        itemsCount
+      ];
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `sales_report_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportCustomersToCSV = () => {
+    if (users.length === 0) {
+      alert('No customers available to export.');
+      return;
+    }
+    const headers = ['Customer ID', 'Name', 'Email', 'Phone', 'Registered Date', 'Order Count', 'Lifetime Value', 'Status', 'Segment'];
+    const rows = users.map(u => {
+      let segment = 'New Customer';
+      if (u.lifetime_value > 300 || u.order_count >= 3) {
+        segment = 'VIP';
+      } else if (u.order_count >= 1) {
+        segment = 'Frequent Buyer';
+      }
+      return [
+        u.id,
+        u.name || '',
+        u.email || '',
+        u.phone || '',
+        new Date(u.created_at).toLocaleDateString(),
+        u.order_count || 0,
+        `$${parseFloat(u.lifetime_value || 0).toFixed(2)}`,
+        u.is_active === 0 ? 'Blocked' : 'Active',
+        segment
+      ];
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `customer_list_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   // Size Guides Management Actions
   const handleStartCreateGuide = () => {
     setIsEditingGuide(true);
     setEditingGuideId(null);
     setGuideFormName('');
-    setGuideFormCategory(categories[0]?.name || '');
+    setGuideFormCategory(categories?.[0]?.name || '');
     setGuideFormColumns('Chest (in), Length (in), Sleeve (in)');
     setGuideFormSlots({
       S: ['', '', ''],
@@ -449,7 +1075,7 @@ function App() {
       if (prod.details) {
         try {
           detailsArray = typeof prod.details === 'string' ? JSON.parse(prod.details) : prod.details;
-        } catch (e) {
+        } catch {
           detailsArray = [prod.details];
         }
       }
@@ -662,6 +1288,23 @@ function App() {
           localStorage.setItem('uclose_admin_token', data.token);
           setUser(data.user);
           setIsAuthenticated(true);
+
+          // Trigger welcome notification popup
+          setActiveNotification({
+            type: 'welcome',
+            adminName: data.user.name || 'Admin'
+          });
+          setIsDismissingNotification(false);
+          playNotificationSound();
+
+          // Auto dismiss welcome notification after 4 seconds
+          setTimeout(() => {
+            setIsDismissingNotification(true);
+            setTimeout(() => {
+              setActiveNotification(prev => prev && prev.type === 'welcome' ? null : prev);
+              setIsDismissingNotification(false);
+            }, 300);
+          }, 4000);
         } else {
           setLoginError('Access Denied: This portal is reserved for administrators only.');
         }
@@ -677,11 +1320,32 @@ function App() {
 
   // Handle Logout
   const handleLogout = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const performLogout = () => {
     localStorage.removeItem('uclose_admin_token');
     localStorage.removeItem('uclose_admin_last_close');
     setUser(null);
     setIsAuthenticated(false);
     setActiveTab('overview');
+    setShowLogoutConfirm(false);
+
+    // Trigger logout notification popup
+    setActiveNotification({
+      type: 'logout'
+    });
+    setIsDismissingNotification(false);
+    playNotificationSound();
+
+    // Auto dismiss logout notification after 4 seconds
+    setTimeout(() => {
+      setIsDismissingNotification(true);
+      setTimeout(() => {
+        setActiveNotification(prev => prev && prev.type === 'logout' ? null : prev);
+        setIsDismissingNotification(false);
+      }, 300);
+    }, 4000);
   };
 
   // Handle Order Status Update
@@ -711,8 +1375,7 @@ function App() {
       const uploadedUrls = [];
       for (const file of files) {
         const data = await api.uploadImage(file);
-        const absoluteUrl = `http://localhost:5000${data.imageUrl}`;
-        uploadedUrls.push(absoluteUrl);
+        uploadedUrls.push(data.imageUrl);
       }
       setProductForm(prev => {
         const newImages = [...(prev.images || []), ...uploadedUrls];
@@ -783,7 +1446,7 @@ function App() {
     setProductForm({
       name: '',
       price: '',
-      category: categories[0]?.name || 'Shirts',
+      category: categories?.[0]?.name || 'Shirts',
       image: '',
       images: [],
       stock: 50,
@@ -805,7 +1468,7 @@ function App() {
         if (Array.isArray(parsedDetails)) {
           detailsText = parsedDetails.join('\n');
         }
-      } catch (e) {
+      } catch {
         detailsText = product.details;
       }
     }
@@ -890,7 +1553,8 @@ function App() {
   // Render Login Card if not authenticated
   if (!isAuthenticated) {
     return (
-      <div className="auth-container">
+      <>
+        <div className="auth-container">
         <div className="bg-glow-1"></div>
         <div className="bg-glow-2"></div>
         <div className="auth-card">
@@ -928,6 +1592,23 @@ function App() {
           </form>
         </div>
       </div>
+      {/* Toast Notification popup for logout */}
+      {activeNotification && activeNotification.type === 'logout' && (
+        <div className={`order-notification-toast ${isDismissingNotification ? 'dismissing' : ''}`}>
+          <div className="notification-header">
+            <span className="notification-badge" style={{ backgroundColor: '#3b82f6' }}>Logged Out</span>
+            <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+          </div>
+          <h4 className="notification-title">Logged Out</h4>
+          <div className="notification-body">
+            Successfully logged out.
+          </div>
+          <div className="notification-actions">
+            <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#3b82f6' }}>OK</button>
+          </div>
+        </div>
+      )}
+      </>
     );
   }
 
@@ -943,9 +1624,24 @@ function App() {
           <div className="brand-badge">Admin Panel</div>
         </div>
         <div className="header-user">
+          <img
+            src={user?.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user?.name || 'Admin')}`}
+            alt="Admin Avatar"
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '1px solid var(--border-color)',
+              background: '#f3f4f6'
+            }}
+            onError={(e) => {
+              e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user?.name || 'Admin')}`;
+            }}
+          />
           <div className="user-info">
-            <div className="user-email">{user?.email}</div>
-            <div className="user-role">Administrator</div>
+            <div className="user-email" style={{ fontWeight: 'bold' }}>{user?.name || 'Admin'}</div>
+            <div className="user-role">{user?.email}</div>
           </div>
           <button onClick={handleLogout} className="logout-btn">
             Log Out
@@ -1046,6 +1742,45 @@ function App() {
               <line x1="3" y1="15" x2="21" y2="15" />
             </svg>
             Size Guides
+          </button>
+          <button
+            onClick={() => setActiveTab('blog')}
+            className={`sidebar-btn ${activeTab === 'blog' ? 'active' : ''}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            Blog Posts
+          </button>
+          <button
+            onClick={() => setActiveTab('reviews')}
+            className={`sidebar-btn ${activeTab === 'reviews' ? 'active' : ''}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+            Product Reviews
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`sidebar-btn ${activeTab === 'settings' ? 'active' : ''}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            Site Settings
+          </button>
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`sidebar-btn ${activeTab === 'profile' ? 'active' : ''}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            Admin Profile
           </button>
         </nav>
 
@@ -1351,11 +2086,19 @@ function App() {
 
                 return (
                   <div>
-                    <div className="section-title-wrapper">
+                    <div className="section-title-wrapper" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
                         <h1 className="section-title">Analytics Reports</h1>
                         <p className="section-subtitle">Aggregated sales performance & insights</p>
                       </div>
+                      <button onClick={exportOrdersToCSV} className="secondary-btn" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Export Orders (CSV)
+                      </button>
                     </div>
 
                     {/* Stats Grid */}
@@ -1558,7 +2301,7 @@ function App() {
                               onChange={(e) => setProductCategoryFilter(e.target.value)}
                             >
                               <option value="All">All Categories</option>
-                              {categories.map(cat => (
+                              {(categories || []).map(cat => (
                                 <option key={cat.id} value={cat.name}>{cat.name}</option>
                               ))}
                             </select>
@@ -1642,7 +2385,7 @@ function App() {
                                   <td>
                                     <div className="actions-cell">
                                       <a 
-                                        href={`http://localhost:5174/product/${p.id}`} 
+                                        href={`http://localhost:5173/product/${p.id}`} 
                                         target="_blank" 
                                         rel="noopener noreferrer" 
                                         className="action-link"
@@ -1693,7 +2436,7 @@ function App() {
                           </form>
 
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-color)', padding: '8px' }}>
-                            {categories.map((cat) => (
+                            {(categories || []).map((cat) => (
                               <div key={cat.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px', padding: '4px 0' }}>
                                 <span style={{ fontWeight: '600' }}>{cat.name}</span>
                                 <button
@@ -1704,7 +2447,7 @@ function App() {
                                 </button>
                               </div>
                             ))}
-                            {categories.length === 0 && (
+                            {(!categories || categories.length === 0) && (
                               <p style={{ fontStyle: 'italic', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', margin: '8px 0' }}>No categories found.</p>
                             )}
                           </div>
@@ -1737,7 +2480,7 @@ function App() {
                                 onChange={(e) => setBulkCategory(e.target.value)}
                               >
                                 <option value="All">All Categories</option>
-                                {categories.map((cat) => (
+                                {(categories || []).map((cat) => (
                                   <option key={cat.id} value={cat.name}>{cat.name}</option>
                                 ))}
                               </select>
@@ -1879,7 +2622,7 @@ function App() {
                                     {order.items?.map((item, idx) => (
                                       <li key={idx} className="order-item-row">
                                         <a
-                                          href={`http://localhost:5174/product/${item.id || item.productId || item.product_id}`}
+                                          href={`http://localhost:5173/product/${item.id || item.productId || item.product_id}`}
                                           target="_blank"
                                           rel="noopener noreferrer"
                                           className="order-item-name"
@@ -1922,10 +2665,38 @@ function App() {
               {/* Tab: Users */}
               {activeTab === 'users' && (
                 <div>
-                  <div className="section-title-wrapper">
+                  <div className="section-title-wrapper" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <h1 className="section-title">User Accounts</h1>
                       <p className="section-subtitle">Audit registered buyers & administrators</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <button onClick={exportCustomersToCSV} className="secondary-btn" style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Export Customers (CSV)
+                      </button>
+                      <button onClick={openAddCustomerModal} className="primary-btn" style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <line x1="19" y1="8" x2="19" y2="14" />
+                          <line x1="16" y1="11" x2="22" y2="11" />
+                        </svg>
+                        + Add Customer
+                      </button>
+                      <button onClick={openAddAdminModal} className="primary-btn" style={{ display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                          <line x1="19" y1="8" x2="19" y2="14" />
+                          <line x1="16" y1="11" x2="22" y2="11" />
+                        </svg>
+                        + Add Administrator
+                      </button>
                     </div>
                   </div>
 
@@ -1949,16 +2720,65 @@ function App() {
                               #{u.id}
                             </td>
                             <td>
-                              <div style={{ fontWeight: '600' }}>{u.name || 'N/A'}</div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <img
+                                  src={u.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name || 'User')}`}
+                                  alt={u.name}
+                                  style={{
+                                    width: '32px',
+                                    height: '32px',
+                                    borderRadius: '50%',
+                                    objectFit: 'cover',
+                                    border: '1px solid var(--border-color)',
+                                    background: '#f3f4f6',
+                                    flexShrink: 0
+                                  }}
+                                  onError={(e) => {
+                                    e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name || 'User')}`;
+                                  }}
+                                />
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ fontWeight: '600' }}>{u.name || 'N/A'}</div>
+                                    {(() => {
+                                      if (u.role === 'admin') {
+                                        return (
+                                          <span style={{ fontSize: '9px', fontWeight: 'bold', background: '#fee2e2', color: '#dc2626', border: '1px solid #fecaca', padding: '1px 6px', borderRadius: '4px' }}>
+                                            Admin
+                                          </span>
+                                        );
+                                      } else if (u.lifetime_value > 300 || u.order_count >= 3) {
+                                        return (
+                                          <span style={{ fontSize: '9px', fontWeight: 'bold', background: '#faf5ff', color: '#6b21a8', border: '1px solid #e9d5ff', padding: '1px 6px', borderRadius: '4px' }}>
+                                            VIP
+                                          </span>
+                                        );
+                                      } else if (u.order_count >= 1) {
+                                        return (
+                                          <span style={{ fontSize: '9px', fontWeight: 'bold', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: '4px' }}>
+                                            Frequent Buyer
+                                          </span>
+                                        );
+                                      } else {
+                                        return (
+                                          <span style={{ fontSize: '9px', fontWeight: 'bold', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', padding: '1px 6px', borderRadius: '4px' }}>
+                                            New Customer
+                                          </span>
+                                        );
+                                      }
+                                    })()}
+                                  </div>
+                                </div>
+                              </div>
                             </td>
                             <td>
                               <div style={{ color: 'var(--text-secondary)' }}>{u.email}</div>
                             </td>
                             <td>
-                              <div style={{ fontWeight: '700' }}>{u.order_count || 0}</div>
+                              <div style={{ fontWeight: '700' }}>{u.role === 'admin' ? '—' : (u.order_count || 0)}</div>
                             </td>
                             <td>
-                              <div style={{ fontWeight: '700' }}>${parseFloat(u.lifetime_value || 0).toFixed(2)}</div>
+                              <div style={{ fontWeight: '700' }}>{u.role === 'admin' ? '—' : `$${parseFloat(u.lifetime_value || 0).toFixed(2)}`}</div>
                             </td>
                             <td>
                               {u.is_active !== 0 ? (
@@ -1973,12 +2793,19 @@ function App() {
                             </td>
                             <td>
                               <div className="actions-cell" style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                                <button onClick={() => handleViewUserHistory(u)} className="action-link">
-                                  Orders
+                                <button onClick={() => openEditUserModal(u)} className="action-link">
+                                  Edit
                                 </button>
-                                <button onClick={() => handleToggleUserStatus(u.id)} className="action-link" style={{ color: u.is_active !== 0 ? '#b91c1c' : '#15803d' }}>
-                                  {u.is_active !== 0 ? 'Block' : 'Unblock'}
-                                </button>
+                                {u.role !== 'admin' && (
+                                  <button onClick={() => handleViewUserHistory(u)} className="action-link">
+                                    Orders
+                                  </button>
+                                )}
+                                {u.id !== user?.id && (
+                                  <button onClick={() => handleToggleUserStatus(u.id)} className="action-link" style={{ color: u.is_active !== 0 ? '#b91c1c' : '#15803d' }}>
+                                    {u.is_active !== 0 ? 'Block' : 'Unblock'}
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -2199,7 +3026,7 @@ function App() {
                               value={guideFormCategory}
                               onChange={(e) => setGuideFormCategory(e.target.value)}
                             >
-                              {categories.map(cat => (
+                              {(categories || []).map(cat => (
                                 <option key={cat.id} value={cat.name}>{cat.name}</option>
                               ))}
                             </select>
@@ -2228,7 +3055,7 @@ function App() {
                               <thead>
                                 <tr>
                                   <th style={{ width: '80px' }}>Size</th>
-                                  {guideFormColumns.split(',').map((c, i) => c.trim()).filter(Boolean).map((col, idx) => (
+                                  {guideFormColumns.split(',').map((c) => c.trim()).filter(Boolean).map((col, idx) => (
                                     <th key={idx}>{col}</th>
                                   ))}
                                 </tr>
@@ -2333,6 +3160,484 @@ function App() {
                   )}
                 </div>
               )}
+
+              {/* Tab: Blog Posts Management */}
+              {activeTab === 'blog' && (
+                <div>
+                  <div className="section-title-wrapper" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                    <div>
+                      <h1 className="section-title">Blog & Announcements</h1>
+                      <p className="section-subtitle">Manage store news, blog articles, and front-page stories</p>
+                    </div>
+                    <button onClick={handleStartCreatePost} className="primary-btn" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      Write New Post
+                    </button>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Title</th>
+                          <th>Author</th>
+                          <th>Content Snippet</th>
+                          <th style={{ textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {posts.map((post) => (
+                          <tr key={post.id}>
+                            <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                              {new Date(post.created_at).toLocaleDateString()}
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: '600' }}>{post.title}</div>
+                            </td>
+                            <td>
+                              <span className="status-badge" style={{ background: '#f3f4f6', color: '#1f2937', border: '1px solid #e5e7eb' }}>
+                                {post.author}
+                              </span>
+                            </td>
+                            <td style={{ maxWidth: '300px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{post.content}</span>
+                            </td>
+                            <td>
+                              <div className="actions-cell">
+                                <button onClick={() => handleStartEditPost(post)} className="action-link">
+                                  Edit
+                                </button>
+                                <button onClick={() => handleDeletePost(post.id)} className="action-link delete">
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {posts.length === 0 && (
+                          <tr>
+                            <td colSpan="5" style={{ fontStyle: 'italic', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                              No blog posts created yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: Product Reviews Moderation */}
+              {activeTab === 'reviews' && (
+                <div>
+                  <div className="section-title-wrapper" style={{ marginBottom: '24px' }}>
+                    <div>
+                      <h1 className="section-title">Product Reviews</h1>
+                      <p className="section-subtitle">Approve or moderate customer ratings and product comments</p>
+                    </div>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Date</th>
+                          <th>Product ID</th>
+                          <th>Customer</th>
+                          <th>Rating</th>
+                          <th>Comment</th>
+                          <th>Status</th>
+                          <th style={{ textAlign: 'right' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviews.map((rev) => (
+                          <tr key={rev.id}>
+                            <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                              {new Date(rev.created_at).toLocaleDateString()}
+                            </td>
+                            <td>
+                              <span className="status-badge" style={{ background: '#eff6ff', color: '#1d4ed8' }}>
+                                Prod #{rev.product_id}
+                              </span>
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: '600' }}>{rev.name}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{rev.email}</div>
+                            </td>
+                            <td>
+                              <div style={{ color: '#fbbf24', fontSize: '14px', fontWeight: 'bold' }}>
+                                {'★'.repeat(rev.rating)}{'☆'.repeat(5 - rev.rating)}
+                              </div>
+                            </td>
+                            <td style={{ maxWidth: '250px', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{rev.comment}</span>
+                            </td>
+                            <td>
+                              {rev.approved ? (
+                                <span className="status-badge status-delivered">Approved</span>
+                              ) : (
+                                <span className="status-badge status-shipped">Pending</span>
+                              )}
+                            </td>
+                            <td>
+                              <div className="actions-cell">
+                                {!rev.approved && (
+                                  <button onClick={() => handleApproveReview(rev.id)} className="action-link" style={{ color: '#16a34a' }}>
+                                    Approve
+                                  </button>
+                                )}
+                                <button onClick={() => handleOpenEditReview(rev)} className="action-link" style={{ color: '#3b82f6' }}>
+                                  Edit
+                                </button>
+                                <button onClick={() => handleDeleteReview(rev.id)} className="action-link delete">
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {reviews.length === 0 && (
+                          <tr>
+                            <td colSpan="7" style={{ fontStyle: 'italic', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                              No product reviews submitted yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: Site Settings Panel */}
+              {activeTab === 'settings' && (
+                <div>
+                  <div className="section-title-wrapper" style={{ marginBottom: '24px' }}>
+                    <div>
+                      <h1 className="section-title">Site Settings & Advanced Controls</h1>
+                      <p className="section-subtitle">Manage brand details, homepage hero section, contact information, and store status</p>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSettingsSubmit} className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+                    <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>General Branding</h2>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Store Name</label>
+                        <input
+                          required
+                          type="text"
+                          className="form-input"
+                          value={siteSettings.site_name}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, site_name: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Header Announcement Banner</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          value={siteSettings.announcement_banner}
+                          placeholder="e.g. Free worldwide shipping over $150"
+                          onChange={(e) => setSiteSettings({ ...siteSettings, announcement_banner: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Branding Star Color</label>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                          <input
+                            type="color"
+                            style={{
+                              width: '40px',
+                              height: '38px',
+                              padding: '0',
+                              border: '1px solid #d1d5db',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              backgroundColor: 'transparent'
+                            }}
+                            value={siteSettings.star_color || '#fbbf24'}
+                            onChange={(e) => setSiteSettings({ ...siteSettings, star_color: e.target.value })}
+                          />
+                          <input
+                            type="text"
+                            className="form-input"
+                            style={{ flex: 1, fontFamily: 'monospace' }}
+                            placeholder="#fbbf24"
+                            value={siteSettings.star_color || '#fbbf24'}
+                            onChange={(e) => setSiteSettings({ ...siteSettings, star_color: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', marginTop: '32px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>Homepage Hero Section</h2>
+                    <div className="form-group" style={{ marginBottom: '20px' }}>
+                      <label className="form-label">Hero Banner Image URL</label>
+                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                        <input
+                          required
+                          type="text"
+                          className="form-input"
+                          style={{ flex: 1 }}
+                          value={siteSettings.hero_image}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, hero_image: e.target.value })}
+                        />
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="hero-image-file"
+                            style={{ display: 'none' }}
+                            onChange={handleHeroImageUpload}
+                          />
+                          <label
+                            htmlFor="hero-image-file"
+                            className="secondary-btn"
+                            style={{
+                              margin: 0,
+                              padding: '10px 16px',
+                              height: '44px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              fontWeight: 'bold',
+                              border: '1px solid var(--border-color)',
+                              background: 'var(--bg-secondary)'
+                            }}
+                          >
+                            {heroImageUploadLoading ? 'Uploading...' : 'Upload File'}
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Hero Title Banner</label>
+                        <input
+                          required
+                          type="text"
+                          className="form-input"
+                          value={siteSettings.hero_title}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, hero_title: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Hero Tagline</label>
+                        <textarea
+                          required
+                          className="form-input"
+                          style={{ height: '80px', padding: '10px 12px' }}
+                          value={siteSettings.hero_tagline}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, hero_tagline: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', marginTop: '32px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>Contact Details & Social Media Links</h2>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Support Email Address</label>
+                        <input
+                          required
+                          type="email"
+                          className="form-input"
+                          placeholder="support@uclose.com"
+                          value={siteSettings.contact_email}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, contact_email: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Support Phone Number</label>
+                        <input
+                          required
+                          type="text"
+                          className="form-input"
+                          placeholder="+1 (555) 019-2834"
+                          value={siteSettings.contact_phone}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, contact_phone: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+                      <div className="form-group">
+                        <label className="form-label">Instagram Profile Link</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="https://instagram.com/uclose"
+                          value={siteSettings.social_instagram}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, social_instagram: e.target.value })}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Facebook Profile Link</label>
+                        <input
+                          type="text"
+                          className="form-input"
+                          placeholder="https://facebook.com/uclose"
+                          value={siteSettings.social_facebook}
+                          onChange={(e) => setSiteSettings({ ...siteSettings, social_facebook: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', marginTop: '32px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px', color: '#b91c1c' }}>System Controls</h2>
+                    
+                    <div className="form-group" style={{ marginBottom: '32px', display: 'flex', alignItems: 'center', gap: '12px', background: '#fef2f2', padding: '16px', borderRadius: '4px', border: '1px solid #fee2e2' }}>
+                      <input
+                        type="checkbox"
+                        id="maintenance_mode"
+                        style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                        checked={siteSettings.maintenance_mode === 'true' || siteSettings.maintenance_mode === '1'}
+                        onChange={(e) => setSiteSettings({ ...siteSettings, maintenance_mode: e.target.checked ? 'true' : 'false' })}
+                      />
+                      <div>
+                        <label htmlFor="maintenance_mode" style={{ fontWeight: 'bold', color: '#991b1b', cursor: 'pointer', display: 'block', fontSize: '14px' }}>
+                          Enable Store Maintenance Mode
+                        </label>
+                        <span style={{ fontSize: '11px', color: '#b91c1c' }}>
+                          If enabled, customer-facing pages are blocked and display a splash maintenance page. Admin panel access is preserved.
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button type="submit" disabled={settingsSaving} className="primary-btn" style={{ minWidth: '150px' }}>
+                        {settingsSaving ? 'Saving Settings...' : 'Save Site Settings'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {/* Tab: Admin Profile settings */}
+              {activeTab === 'profile' && (
+                <div>
+                  <div className="section-title-wrapper" style={{ marginBottom: '24px' }}>
+                    <div>
+                      <h1 className="section-title">Admin Profile Settings</h1>
+                      <p className="section-subtitle">Update your personal account details and upload a display picture</p>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleProfileSubmit} className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', maxWidth: '600px' }}>
+                    {/* Avatar Preview & Upload Area */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '32px', padding: '20px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+                      <div style={{ position: 'relative', width: '80px', height: '80px', borderRadius: '50%', overflow: 'hidden', border: '2px solid var(--border-color)', flexShrink: 0 }}>
+                        <img
+                          src={profileForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileForm.name || 'Admin')}`}
+                          alt="Admin Avatar"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => {
+                            e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileForm.name || 'Admin')}`;
+                          }}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <h4 style={{ margin: 0, fontWeight: 'bold', fontSize: '14px' }}>Profile Picture / Avatar</h4>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="admin-avatar-file"
+                            style={{ display: 'none' }}
+                            onChange={handleAdminAvatarUpload}
+                          />
+                          <label
+                            htmlFor="admin-avatar-file"
+                            className="secondary-btn"
+                            style={{
+                              margin: 0,
+                              padding: '8px 16px',
+                              cursor: 'pointer',
+                              fontWeight: 'bold',
+                              border: '1px solid var(--border-color)',
+                              background: '#fff'
+                            }}
+                          >
+                            {profileUploadLoading ? 'Uploading...' : 'Choose Image File'}
+                          </label>
+                          {profileForm.dp && (
+                            <button
+                              type="button"
+                              onClick={() => setProfileForm(prev => ({ ...prev, dp: '' }))}
+                              style={{ background: 'transparent', border: 'none', color: '#dc2626', fontSize: '11px', cursor: 'pointer', fontWeight: 'bold' }}
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Supported formats: JPG, PNG, GIF, WEBP. Max 5MB.</span>
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '20px' }}>
+                      <label className="form-label">Full Name</label>
+                      <input
+                        required
+                        type="text"
+                        className="form-input"
+                        placeholder="Admin Name"
+                        value={profileForm.name}
+                        onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                        disabled={profileSaving}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '20px' }}>
+                      <label className="form-label">Phone Number</label>
+                      <input
+                        type="tel"
+                        className="form-input"
+                        placeholder="+91 98765 43210"
+                        value={profileForm.phone}
+                        onChange={(e) => setProfileForm({ ...profileForm, phone: e.target.value })}
+                        disabled={profileSaving}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '20px', opacity: 0.7 }}>
+                      <label className="form-label">Email Address (Read-only)</label>
+                      <input
+                        type="email"
+                        className="form-input"
+                        value={user?.email || ''}
+                        readOnly
+                        style={{ cursor: 'not-allowed', background: 'var(--bg-secondary)' }}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '32px' }}>
+                      <label className="form-label">Profile Picture URL (Optional)</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="https://example.com/avatar.png"
+                        value={profileForm.dp}
+                        onChange={(e) => setProfileForm({ ...profileForm, dp: e.target.value })}
+                        disabled={profileSaving}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button type="submit" disabled={profileSaving || profileUploadLoading} className="primary-btn" style={{ minWidth: '150px' }}>
+                        {profileSaving ? 'Saving Profile...' : 'Save Profile Details'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
             </>
           )}
         </main>
@@ -2399,7 +3704,7 @@ function App() {
                       onChange={(e) => setProductForm({ ...productForm, category: e.target.value })}
                       style={{ cursor: 'pointer' }}
                     >
-                      {categories.map((cat) => (
+                      {(categories || []).map((cat) => (
                         <option key={cat.id} value={cat.name}>{cat.name}</option>
                       ))}
                     </select>
@@ -2668,6 +3973,65 @@ function App() {
         </div>
       )}
 
+      {/* Modal: Write / Edit Blog Post */}
+      {showBlogModal && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">{editingPost ? 'Edit Blog Post' : 'Write New Blog Post'}</h2>
+              <button onClick={() => setShowBlogModal(false)} className="modal-close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleBlogSubmit}>
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Post Title</label>
+                  <input
+                    required
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Summer Style Guide 2026"
+                    value={blogForm.title}
+                    onChange={(e) => setBlogForm({ ...blogForm, title: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Author Name</label>
+                  <input
+                    required
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. John Doe"
+                    value={blogForm.author}
+                    onChange={(e) => setBlogForm({ ...blogForm, author: e.target.value })}
+                  />
+                </div>
+                <div className="form-group" style={{ marginBottom: '24px' }}>
+                  <label className="form-label">Post Content</label>
+                  <textarea
+                    required
+                    className="form-input"
+                    style={{ height: '200px', padding: '10px 12px', resize: 'vertical' }}
+                    placeholder="Write your announcement or blog post here..."
+                    value={blogForm.content}
+                    onChange={(e) => setBlogForm({ ...blogForm, content: e.target.value })}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowBlogModal(false)} className="secondary-btn">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={blogSubmitting} className="primary-btn">
+                    {blogSubmitting ? 'Saving...' : 'Publish Post'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal: Create Coupon */}
       {showCouponModal && (
         <div className="modal-overlay">
@@ -2737,7 +4101,7 @@ function App() {
                     onChange={(e) => setCouponForm({ ...couponForm, category: e.target.value })}
                   >
                     <option value="All">All Categories</option>
-                    {categories.map((cat) => (
+                    {(categories || []).map((cat) => (
                       <option key={cat.id} value={cat.name}>{cat.name}</option>
                     ))}
                   </select>
@@ -2973,6 +4337,551 @@ function App() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal: Admin Logout Confirmation */}
+      {showLogoutConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '400px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Logout</h2>
+              <button onClick={() => setShowLogoutConfirm(false)} className="modal-close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: '1.5', marginBottom: '24px' }}>
+                Are you sure you want to logout?
+              </p>
+              <div className="modal-footer" style={{ border: 'none', padding: 0, marginTop: 0 }}>
+                <button 
+                  onClick={() => setShowLogoutConfirm(false)} 
+                  className="secondary-btn" 
+                  style={{ marginRight: '12px' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={performLogout} 
+                  className="primary-btn" 
+                  style={{ backgroundColor: 'var(--danger)', border: 'none' }}
+                >
+                  Log Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Review */}
+      {showReviewEditModal && editingReview && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Edit Product Review</h2>
+              <button onClick={() => setShowReviewEditModal(false)} className="modal-close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleUpdateReviewSubmit}>
+                <div style={{ marginBottom: '16px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                  Editing review by <strong>{editingReview.name}</strong> ({editingReview.email}) for Product #{editingReview.product_id}.
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Rating (1 to 5 Stars)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', gap: '8px', fontSize: '20px', cursor: 'pointer' }}>
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <span
+                          key={star}
+                          onClick={() => setReviewForm({ ...reviewForm, rating: star })}
+                          style={{ 
+                            color: star <= reviewForm.rating ? (
+                                reviewForm.rating === 1 ? '#ef4444' :
+                                reviewForm.rating === 2 ? '#f97316' :
+                                reviewForm.rating === 3 ? '#eab308' :
+                                reviewForm.rating === 4 ? '#22c55e' :
+                                reviewForm.rating === 5 ? '#10b981' : '#fbbf24'
+                            ) : '#d1d5db',
+                            transition: 'color 0.2s ease'
+                          }}
+                        >
+                          ★
+                        </span>
+                      ))}
+                    </div>
+                    <span style={{ 
+                      fontSize: '12px', 
+                      fontWeight: 'bold', 
+                      textTransform: 'uppercase', 
+                      letterSpacing: '0.05em',
+                      transition: 'color 0.3s ease',
+                      color: 
+                        reviewForm.rating === 1 ? '#ef4444' :
+                        reviewForm.rating === 2 ? '#f97316' :
+                        reviewForm.rating === 3 ? '#eab308' :
+                        reviewForm.rating === 4 ? '#22c55e' :
+                        reviewForm.rating === 5 ? '#10b981' : '#9ca3af'
+                    }}>
+                      {reviewForm.rating === 1 && 'Very Dissatisfied'}
+                      {reviewForm.rating === 2 && 'Dissatisfied'}
+                      {reviewForm.rating === 3 && 'Neutral'}
+                      {reviewForm.rating === 4 && 'Satisfied'}
+                      {reviewForm.rating === 5 && 'Very Satisfied'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '24px' }}>
+                  <label className="form-label">Review Comment</label>
+                  <textarea
+                    required
+                    className="form-input"
+                    style={{ height: '120px', padding: '10px 12px', resize: 'vertical' }}
+                    value={reviewForm.comment}
+                    onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowReviewEditModal(false)} className="secondary-btn">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={reviewSubmitting} className="primary-btn">
+                    {reviewSubmitting ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit User Details */}
+      {showEditUserModal && editingCustomer && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Edit User Profile</h2>
+              <button onClick={() => setShowEditUserModal(false)} className="modal-close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleEditUserSubmit}>
+                {/* Avatar Uploader */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+                  <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                    <img
+                      src={editUserForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(editUserForm.name || 'User')}`}
+                      alt="User Avatar"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(editUserForm.name || 'User')}`;
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px' }}>Profile Image File</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        id="user-edit-avatar-file"
+                        style={{ display: 'none' }}
+                        onChange={handleEditUserAvatarUpload}
+                      />
+                      <label
+                        htmlFor="user-edit-avatar-file"
+                        className="secondary-btn"
+                        style={{
+                          margin: 0,
+                          padding: '6px 12px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold',
+                          border: '1px solid var(--border-color)',
+                          background: '#fff'
+                        }}
+                      >
+                        {editUserUploadLoading ? 'Uploading...' : 'Upload Image File'}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Full Name</label>
+                  <input
+                    required
+                    type="text"
+                    className="form-input"
+                    value={editUserForm.name}
+                    onChange={(e) => setEditUserForm({ ...editUserForm, name: e.target.value })}
+                    disabled={editUserSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Phone Number</label>
+                  <input
+                    type="tel"
+                    className="form-input"
+                    placeholder="e.g. +91 98765 43210"
+                    value={editUserForm.phone}
+                    onChange={(e) => setEditUserForm({ ...editUserForm, phone: e.target.value })}
+                    disabled={editUserSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px', opacity: 0.7 }}>
+                  <label className="form-label">Email Address (Read-only)</label>
+                  <input
+                    type="email"
+                    className="form-input"
+                    value={editingCustomer.email}
+                    readOnly
+                    style={{ cursor: 'not-allowed', background: 'var(--bg-secondary)' }}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '24px' }}>
+                  <label className="form-label">Profile Picture URL (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="https://example.com/image.png"
+                    value={editUserForm.dp}
+                    onChange={(e) => setEditUserForm({ ...editUserForm, dp: e.target.value })}
+                    disabled={editUserSaving}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowEditUserModal(false)} className="secondary-btn">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={editUserSaving || editUserUploadLoading} className="primary-btn">
+                    {editUserSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add Administrator Details */}
+      {showAddAdminModal && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Add Administrator</h2>
+              <button onClick={() => setShowAddAdminModal(false)} className="modal-close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              <form onSubmit={handleAddAdminSubmit}>
+                {/* Avatar Uploader */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+                  <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                    <img
+                      src={addAdminForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addAdminForm.name || 'Admin')}`}
+                      alt="Admin Avatar"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addAdminForm.name || 'Admin')}`;
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px' }}>Profile Image File</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        id="admin-add-avatar-file"
+                        style={{ display: 'none' }}
+                        onChange={handleAddAdminAvatarUpload}
+                      />
+                      <label
+                        htmlFor="admin-add-avatar-file"
+                        className="secondary-btn"
+                        style={{
+                          margin: 0,
+                          padding: '6px 12px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold',
+                          border: '1px solid var(--border-color)',
+                          background: '#fff'
+                        }}
+                      >
+                        {addAdminUploadLoading ? 'Uploading...' : 'Upload Image File'}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Full Name</label>
+                  <input
+                    required
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. John Doe"
+                    value={addAdminForm.name}
+                    onChange={(e) => setAddAdminForm({ ...addAdminForm, name: e.target.value })}
+                    disabled={addAdminSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Email Address / Gmail</label>
+                  <input
+                    required
+                    type="email"
+                    className="form-input"
+                    placeholder="e.g. admin.new@gmail.com"
+                    value={addAdminForm.email}
+                    onChange={(e) => setAddAdminForm({ ...addAdminForm, email: e.target.value })}
+                    disabled={addAdminSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Temporary Password</label>
+                  <input
+                    required
+                    type="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={addAdminForm.password}
+                    onChange={(e) => setAddAdminForm({ ...addAdminForm, password: e.target.value })}
+                    disabled={addAdminSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Phone Number (Optional)</label>
+                  <input
+                    type="tel"
+                    className="form-input"
+                    placeholder="e.g. +91 98765 43210"
+                    value={addAdminForm.phone}
+                    onChange={(e) => setAddAdminForm({ ...addAdminForm, phone: e.target.value })}
+                    disabled={addAdminSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '24px' }}>
+                  <label className="form-label">Profile Picture URL (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="https://example.com/image.png"
+                    value={addAdminForm.dp}
+                    onChange={(e) => setAddAdminForm({ ...addAdminForm, dp: e.target.value })}
+                    disabled={addAdminSaving}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowAddAdminModal(false)} className="secondary-btn">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={addAdminSaving || addAdminUploadLoading} className="primary-btn">
+                    {addAdminSaving ? 'Saving...' : 'Add Administrator'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add Customer Details */}
+      {showAddCustomerModal && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '500px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Add Customer</h2>
+              <button onClick={() => setShowAddCustomerModal(false)} className="modal-close">
+                &times;
+              </button>
+            </div>
+            <div className="modal-body" style={{ padding: '24px' }}>
+              <form onSubmit={handleAddCustomerSubmit}>
+                {/* Avatar Uploader */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
+                  <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
+                    <img
+                      src={addCustomerForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addCustomerForm.name || 'User')}`}
+                      alt="Customer Avatar"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        e.target.src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addCustomerForm.name || 'User')}`;
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '13px' }}>Profile Image File</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        id="customer-add-avatar-file"
+                        style={{ display: 'none' }}
+                        onChange={handleAddCustomerAvatarUpload}
+                      />
+                      <label
+                        htmlFor="customer-add-avatar-file"
+                        className="secondary-btn"
+                        style={{
+                          margin: 0,
+                          padding: '6px 12px',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                          fontWeight: 'bold',
+                          border: '1px solid var(--border-color)',
+                          background: '#fff'
+                        }}
+                      >
+                        {addCustomerUploadLoading ? 'Uploading...' : 'Upload Image File'}
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Full Name</label>
+                  <input
+                    required
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Jane Smith"
+                    value={addCustomerForm.name}
+                    onChange={(e) => setAddCustomerForm({ ...addCustomerForm, name: e.target.value })}
+                    disabled={addCustomerSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Email Address / Gmail</label>
+                  <input
+                    required
+                    type="email"
+                    className="form-input"
+                    placeholder="e.g. customer@gmail.com"
+                    value={addCustomerForm.email}
+                    onChange={(e) => setAddCustomerForm({ ...addCustomerForm, email: e.target.value })}
+                    disabled={addCustomerSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Temporary Password</label>
+                  <input
+                    required
+                    type="password"
+                    className="form-input"
+                    placeholder="••••••••"
+                    value={addCustomerForm.password}
+                    onChange={(e) => setAddCustomerForm({ ...addCustomerForm, password: e.target.value })}
+                    disabled={addCustomerSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label">Phone Number (Optional)</label>
+                  <input
+                    type="tel"
+                    className="form-input"
+                    placeholder="e.g. +91 98765 43210"
+                    value={addCustomerForm.phone}
+                    onChange={(e) => setAddCustomerForm({ ...addCustomerForm, phone: e.target.value })}
+                    disabled={addCustomerSaving}
+                  />
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '24px' }}>
+                  <label className="form-label">Profile Picture URL (Optional)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="https://example.com/image.png"
+                    value={addCustomerForm.dp}
+                    onChange={(e) => setAddCustomerForm({ ...addCustomerForm, dp: e.target.value })}
+                    disabled={addCustomerSaving}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                  <button type="button" onClick={() => setShowAddCustomerModal(false)} className="secondary-btn">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={addCustomerSaving || addCustomerUploadLoading} className="primary-btn">
+                    {addCustomerSaving ? 'Saving...' : 'Add Customer'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification popup */}
+      {isAuthenticated && activeNotification && (
+        <div className={`order-notification-toast ${isDismissingNotification ? 'dismissing' : ''}`}>
+          {activeNotification.type === 'welcome' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#10b981' }}>Welcome</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">Welcome</h4>
+              <div className="notification-body">
+                Welcome back, <strong>{activeNotification.adminName}</strong>.
+              </div>
+              <div className="notification-actions">
+                <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#10b981' }}>Continue</button>
+              </div>
+            </>
+          ) : activeNotification.type === 'logout' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#3b82f6' }}>Logged Out</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">Logged Out</h4>
+              <div className="notification-body">
+                Successfully logged out.
+              </div>
+              <div className="notification-actions">
+                <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#3b82f6' }}>OK</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge">Live Alert</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">New Order Confirmed!</h4>
+              <div className="notification-body">
+                <strong>{activeNotification.customerName}</strong> just placed order <strong>#{activeNotification.id}</strong> for <strong>${parseFloat(activeNotification.total || 0).toFixed(2)}</strong> ({activeNotification.itemsCount} {activeNotification.itemsCount === 1 ? 'item' : 'items'}).
+              </div>
+              <div className="notification-actions">
+                <button onClick={handleViewNotificationOrder} className="notification-btn-view">View Order</button>
+                <button onClick={dismissNotification} className="notification-btn-dismiss">Dismiss</button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

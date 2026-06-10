@@ -130,6 +130,32 @@ export const api = {
     getUserOrders: (userId) =>
         request(`/api/admin/users/${userId}/orders`),
 
+    updateUser: (userId, userData) =>
+        request(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(userData)
+        }),
+
+    updateProfileDetails: (name, phone, dp) =>
+        request('/api/auth/profile/update', {
+            method: 'PUT',
+            body: JSON.stringify({ name, phone, dp })
+        }),
+
+    createAdmin: (adminData) =>
+        request('/api/admin/users/create-admin', {
+            method: 'POST',
+            body: JSON.stringify(adminData)
+        }),
+
+    createCustomer: (userData) =>
+        request('/api/admin/users/create-customer', {
+            method: 'POST',
+            body: JSON.stringify(userData)
+        }),
+
+
+
     // Order tracking
     updateOrderTracking: (orderId, trackingData) =>
         request(`/api/admin/orders/${orderId}/tracking`, {
@@ -202,5 +228,46 @@ export const api = {
     deleteSizeGuide: (guideId) =>
         request(`/api/size-guides/${guideId}`, {
             method: 'DELETE'
+        }),
+
+    // Blog / Posts endpoints
+    getPosts: () =>
+        request('/api/posts'),
+
+    createPost: (postData) =>
+        request('/api/posts', {
+            method: 'POST',
+            body: JSON.stringify(postData)
+        }),
+
+    updatePost: (postId, postData) =>
+        request(`/api/posts/${postId}`, {
+            method: 'PUT',
+            body: JSON.stringify(postData)
+        }),
+
+    deletePost: (postId) =>
+        request(`/api/posts/${postId}`, {
+            method: 'DELETE'
+        }),
+
+    // Reviews endpoints
+    getReviews: () =>
+        request('/api/reviews'),
+
+    approveReview: (reviewId) =>
+        request(`/api/reviews/${reviewId}/approve`, {
+            method: 'PUT'
+        }),
+
+    deleteReview: (reviewId) =>
+        request(`/api/reviews/${reviewId}`, {
+            method: 'DELETE'
+        }),
+
+    updateReview: (reviewId, data) =>
+        request(`/api/reviews/${reviewId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
         })
 };
