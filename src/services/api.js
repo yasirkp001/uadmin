@@ -2,6 +2,12 @@ export const API_BASE_URL = window.location.hostname === 'localhost' || window.l
     ? '' 
     : 'https://ubackend-guk8.onrender.com';
 
+export const getImageUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) return url;
+    return `${API_BASE_URL}${url}`;
+};
+
 async function request(endpoint, options = {}) {
     const token = localStorage.getItem('uclose_admin_token') || sessionStorage.getItem('uclose_admin_token');
     
@@ -94,7 +100,7 @@ export const api = {
             headers['Authorization'] = `Bearer ${token}`;
         }
         
-        return fetch('/api/admin/upload', {
+        return fetch(`${API_BASE_URL}/api/admin/upload`, {
             method: 'POST',
             headers,
             body: formData
@@ -114,6 +120,12 @@ export const api = {
     createCoupon: (couponData) =>
         request('/api/admin/coupons', {
             method: 'POST',
+            body: JSON.stringify(couponData)
+        }),
+
+    updateCoupon: (couponId, couponData) =>
+        request(`/api/admin/coupons/${couponId}`, {
+            method: 'PUT',
             body: JSON.stringify(couponData)
         }),
 
@@ -270,5 +282,31 @@ export const api = {
         request(`/api/reviews/${reviewId}`, {
             method: 'PUT',
             body: JSON.stringify(data)
+        }),
+
+    // Security: change own admin password
+    changePassword: (currentPassword, newPassword) =>
+        request('/api/admin/change-password', {
+            method: 'PUT',
+            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+        }),
+
+    // Internal order notes
+    updateOrderNotes: (orderId, notes) =>
+        request(`/api/admin/orders/${orderId}/notes`, {
+            method: 'PUT',
+            body: JSON.stringify({ notes })
+        }),
+
+    // Admin activity log
+    getActivityLog: () =>
+        request('/api/admin/activity'),
+
+    getMedia: () =>
+        request('/api/admin/media'),
+
+    deleteMedia: (filename) =>
+        request(`/api/admin/media/${filename}`, {
+            method: 'DELETE'
         })
 };

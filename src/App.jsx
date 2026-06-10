@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api, API_BASE_URL } from './services/api';
+import { api, API_BASE_URL, getImageUrl } from './services/api';
 import './App.css';
 
 const playNotificationSound = () => {
@@ -34,6 +34,29 @@ const playNotificationSound = () => {
   }
 };
 
+const renderBarcode = (code) => {
+  if (!code) return null;
+  const bars = [];
+  let x = 0;
+  for (let i = 0; i < code.length; i++) {
+    const charCode = code.charCodeAt(i);
+    const w1 = (charCode % 3) + 1;
+    const w2 = ((charCode >> 1) % 3) + 1;
+    bars.push(<rect key={`b-${i}-1`} x={x} y="0" width={w1} height="30" fill="black" />);
+    x += w1 + ((charCode >> 2) % 2) + 1;
+    bars.push(<rect key={`b-${i}-2`} x={x} y="0" width={w2} height="30" fill="black" />);
+    x += w2 + 2;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', marginTop: '8px' }}>
+      <svg width={x} height="30" style={{ overflow: 'visible' }}>
+        {bars}
+      </svg>
+      <span style={{ fontSize: '8px', fontFamily: 'monospace', letterSpacing: '1px', marginTop: '3px', color: '#6b7280' }}>#{code}</span>
+    </div>
+  );
+};
+
 function App() {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -62,6 +85,7 @@ function App() {
 
   // Coupon state
   const [showCouponModal, setShowCouponModal] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState(null);
   const [couponForm, setCouponForm] = useState({
     code: '',
     discount_type: 'percentage',
@@ -71,6 +95,21 @@ function App() {
     usage_limit: '',
     category: 'All'
   });
+
+  // Product catalog search state
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+
+  // Admin password change state
+  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' });
+  const [passwordSaving, setPasswordSaving] = useState(false);
+
+  // Internal order notes state
+  const [orderNotesDraft, setOrderNotesDraft] = useState('');
+  const [orderNotesSaving, setOrderNotesSaving] = useState(false);
+
+  // Activity log state
+  const [activityLog, setActivityLog] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   // Selected order details state
   const [selectedOrder, setSelectedOrder] = useState(null);
@@ -189,6 +228,30 @@ function App() {
 
   // State for Site Settings Hero Image Upload
   const [heroImageUploadLoading, setHeroImageUploadLoading] = useState(false);
+
+  // Premium Features: Media Library States
+  const [mediaList, setMediaList] = useState([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaPickerMode, setMediaPickerMode] = useState(false);
+  const [mediaPickerCallback, setMediaPickerCallback] = useState(null);
+  const [mediaUploadLoading, setMediaUploadLoading] = useState(false);
+  const [selectedMediaFiles, setSelectedMediaFiles] = useState([]);
+  const [settingsSubTab, setSettingsSubTab] = useState('general');
+
+  // Premium Features: Live Activity Ticker States
+  const [liveActivities, setLiveActivities] = useState([
+    { id: 'initial-1', type: 'system', name: 'Admin Dashboard', message: 'System initialized successfully.', time: new Date().toISOString(), color: '#10b981', icon: '⚡' }
+  ]);
+  const [isActivitySidebarOpen, setIsActivitySidebarOpen] = useState(false);
+
+  // Premium Features: Size Guide Grid States
+  const [guideFormSizes, setGuideFormSizes] = useState(['S', 'M', 'L', 'XL', 'XXL']);
+  const [newSizeRowText, setNewSizeRowText] = useState('');
+  const [draggedIndex, setDraggedIndex] = useState(null);
+
+  // Premium Features: Hovered Category State for Doughnut Chart
+  const [hoveredCategory, setHoveredCategory] = useState(null);
+  const [hoveredPoint, setHoveredPoint] = useState(null);
 
   // Sync admin details to profile form state
   useEffect(() => {
@@ -315,17 +378,128 @@ function App() {
         const orderData = JSON.parse(event.data);
         console.log('[SSE] Received new order event:', orderData);
         
+        // Push to activities feed
+        const activity = {
+          id: `order-${Date.now()}`,
+          type: 'new-order',
+          idRef: orderData.id,
+          name: 'New Order',
+          message: `Order #${orderData.id} placed by ${orderData.customerName} for $${parseFloat(orderData.total || 0).toFixed(2)}`,
+          time: new Date().toISOString(),
+          color: '#3b82f6',
+          icon: '🛒'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
         // Play chime sound
         playNotificationSound();
 
         // Show toast
-        setActiveNotification(orderData);
+        setActiveNotification({
+          type: 'new-order',
+          id: orderData.id,
+          customerName: orderData.customerName,
+          total: orderData.total,
+          itemsCount: orderData.itemsCount
+        });
         setIsDismissingNotification(false);
 
         // Auto-refresh stats and orders to keep dashboard up to date
         loadDashboardData();
       } catch (err) {
         console.error('[SSE] Failed to parse new order event:', err.message);
+      }
+    });
+
+    eventSource.addEventListener('user-registered', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received user registration event:', data);
+        
+        const activity = {
+          id: `user-${Date.now()}`,
+          type: 'user-registered',
+          name: 'New User Registration',
+          message: `${data.name} (${data.email}) registered as a customer.`,
+          time: data.time || new Date().toISOString(),
+          color: '#10b981',
+          icon: '👤'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
+        playNotificationSound();
+
+        setActiveNotification({
+          type: 'user-registered',
+          name: data.name,
+          email: data.email
+        });
+        setIsDismissingNotification(false);
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse user registration:', err.message);
+      }
+    });
+
+    eventSource.addEventListener('ticket-created', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received ticket creation event:', data);
+        
+        const activity = {
+          id: `ticket-${Date.now()}`,
+          type: 'ticket-created',
+          name: 'New Support Inquiry',
+          message: `Ticket #${data.id} opened by ${data.name} (${data.email}).`,
+          time: data.time || new Date().toISOString(),
+          color: '#f59e0b',
+          icon: '💬'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
+        playNotificationSound();
+
+        setActiveNotification({
+          type: 'ticket-created',
+          id: data.id,
+          name: data.name,
+          email: data.email
+        });
+        setIsDismissingNotification(false);
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse ticket creation:', err.message);
+      }
+    });
+
+    eventSource.addEventListener('review-submitted', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[SSE] Received review event:', data);
+        
+        const activity = {
+          id: `review-${Date.now()}`,
+          type: 'review-submitted',
+          name: 'New Product Review',
+          message: `${data.name} rated product ${data.rating} stars.`,
+          time: data.time || new Date().toISOString(),
+          color: '#ec4899',
+          icon: '⭐'
+        };
+        setLiveActivities(prev => [activity, ...prev]);
+
+        playNotificationSound();
+
+        setActiveNotification({
+          type: 'review-submitted',
+          id: data.id,
+          name: data.name,
+          rating: data.rating
+        });
+        setIsDismissingNotification(false);
+        loadDashboardData();
+      } catch (err) {
+        console.error('[SSE] Failed to parse review submission:', err.message);
       }
     });
 
@@ -347,18 +521,25 @@ function App() {
     }, 300);
   };
 
-  const handleViewNotificationOrder = () => {
+  const handleViewNotification = () => {
     if (!activeNotification) return;
-    const orderId = activeNotification.id;
     setIsDismissingNotification(true);
     setTimeout(() => {
+      const type = activeNotification.type;
+      const id = activeNotification.id;
       setActiveNotification(null);
       setIsDismissingNotification(false);
       
-      // Navigate to orders tab
-      setActiveTab('orders');
-      // Pre-fill search query with the new order ID to highlight it
-      setOrderSearchQuery(orderId);
+      if (type === 'new-order' || !type) {
+        setActiveTab('orders');
+        setOrderSearchQuery(id || '');
+      } else if (type === 'user-registered') {
+        setActiveTab('users');
+      } else if (type === 'ticket-created') {
+        setActiveTab('support');
+      } else if (type === 'review-submitted') {
+        setActiveTab('reviews');
+      }
     }, 300);
   };
 
@@ -376,6 +557,15 @@ function App() {
       window.removeEventListener('beforeunload', handleUnload);
     };
   }, []);
+
+  // Fetch the admin activity log (called when the Activity tab opens or refreshes)
+  const refreshActivityLog = () => {
+    setActivityLoading(true);
+    api.getActivityLog()
+      .then((data) => setActivityLog(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Failed to load activity log:', err.message))
+      .finally(() => setActivityLoading(false));
+  };
 
   // Load Dashboard Data
   async function loadDashboardData() {
@@ -896,6 +1086,7 @@ function App() {
     setGuideFormName('');
     setGuideFormCategory(categories?.[0]?.name || '');
     setGuideFormColumns('Chest (in), Length (in), Sleeve (in)');
+    setGuideFormSizes(['S', 'M', 'L', 'XL', 'XXL']);
     setGuideFormSlots({
       S: ['', '', ''],
       M: ['', '', ''],
@@ -912,7 +1103,10 @@ function App() {
     setGuideFormCategory(guide.category);
     setGuideFormColumns(guide.columns.join(', '));
 
-    const initialSlots = { S: [], M: [], L: [], XL: [], XXL: [] };
+    const sizes = guide.slots.map(s => s.size);
+    setGuideFormSizes(sizes);
+
+    const initialSlots = {};
     guide.slots.forEach(slot => {
       initialSlots[slot.size] = [...slot.measurements];
     });
@@ -927,7 +1121,7 @@ function App() {
       return;
     }
 
-    const slotsArray = ['S', 'M', 'L', 'XL', 'XXL'].map(size => {
+    const slotsArray = guideFormSizes.map(size => {
       const measurements = columnsArray.map((_, colIndex) => {
         const val = guideFormSlots[size]?.[colIndex];
         return val || '';
@@ -978,6 +1172,163 @@ function App() {
       copy[size][colIndex] = value;
       return copy;
     });
+  };
+
+  const handleAddSizeRow = () => {
+    if (!newSizeRowText.trim()) return;
+    const newSize = newSizeRowText.trim();
+    if (guideFormSizes.includes(newSize)) {
+      alert('Size already exists!');
+      return;
+    }
+    setGuideFormSizes([...guideFormSizes, newSize]);
+    setGuideFormSlots(prev => ({
+      ...prev,
+      [newSize]: Array(guideFormColumns.split(',').length).fill('')
+    }));
+    setNewSizeRowText('');
+  };
+
+  const handleRemoveSizeRow = (size) => {
+    setGuideFormSizes(guideFormSizes.filter(s => s !== size));
+    setGuideFormSlots(prev => {
+      const copy = { ...prev };
+      delete copy[size];
+      return copy;
+    });
+  };
+
+  const handleLoadTemplate = (type) => {
+    if (type === 'tops') {
+      setGuideFormColumns('Chest (in), Length (in), Sleeve (in)');
+      setGuideFormSizes(['XS', 'S', 'M', 'L', 'XL', 'XXL']);
+      setGuideFormSlots({
+        XS: ['34-36', '27', '32'],
+        S: ['36-38', '28', '33'],
+        M: ['38-40', '29', '34'],
+        L: ['40-42', '30', '35'],
+        XL: ['42-44', '31', '36'],
+        XXL: ['44-46', '32', '37']
+      });
+    } else if (type === 'bottoms') {
+      setGuideFormColumns('Waist (in), Inseam (in), Hip (in)');
+      setGuideFormSizes(['XS', 'S', 'M', 'L', 'XL', 'XXL']);
+      setGuideFormSlots({
+        XS: ['26-28', '30', '34-36'],
+        S: ['28-30', '30', '36-38'],
+        M: ['30-32', '31', '38-40'],
+        L: ['32-34', '31', '40-42'],
+        XL: ['34-36', '32', '42-44'],
+        XXL: ['36-38', '32', '44-46']
+      });
+    } else if (type === 'shoes') {
+      setGuideFormColumns('Foot Length (cm), US Size, EU Size, UK Size');
+      setGuideFormSizes(['Size 39', 'Size 40', 'Size 41', 'Size 42', 'Size 43', 'Size 44']);
+      setGuideFormSlots({
+        'Size 39': ['24.5', '6.5', '39', '5.5'],
+        'Size 40': ['25.0', '7.0', '40', '6.0'],
+        'Size 41': ['25.5', '8.0', '41', '7.0'],
+        'Size 42': ['26.0', '8.5', '42', '7.5'],
+        'Size 43': ['26.5', '9.5', '43', '8.5'],
+        'Size 44': ['27.0', '10.0', '44', '9.0']
+      });
+    }
+  };
+
+  const handleDragStart = (e, index) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e, index) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+    const sizes = [...guideFormSizes];
+    const item = sizes[draggedIndex];
+    sizes.splice(draggedIndex, 1);
+    sizes.splice(index, 0, item);
+    setGuideFormSizes(sizes);
+    setDraggedIndex(null);
+  };
+
+  // Media Library Handlers
+  const loadMediaItems = async () => {
+    setMediaLoading(true);
+    try {
+      const media = await api.getMedia();
+      setMediaList(Array.isArray(media) ? media : []);
+    } catch (err) {
+      console.error('Failed to load media items:', err.message);
+    } finally {
+      setMediaLoading(false);
+    }
+  };
+
+  const handleOpenMediaPicker = (callback) => {
+    setMediaPickerCallback(() => callback);
+    setMediaPickerMode(true);
+    loadMediaItems();
+  };
+
+  const handleSelectMediaItem = (item) => {
+    if (mediaPickerCallback) {
+      const imageUrl = `/uploads/${item.filename}`;
+      mediaPickerCallback(imageUrl);
+    }
+    setMediaPickerMode(false);
+    setMediaPickerCallback(null);
+  };
+
+  const handleMediaUpload = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setMediaUploadLoading(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        await api.uploadImage(files[i]);
+      }
+      alert('Images uploaded successfully!');
+      loadMediaItems();
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setMediaUploadLoading(false);
+    }
+  };
+
+  const handleCopyUrl = (filename) => {
+    const url = getImageUrl(`/uploads/${filename}`);
+    navigator.clipboard.writeText(url);
+    alert('URL copied to clipboard: ' + url);
+  };
+
+  const handleToggleMediaSelect = (filename) => {
+    setSelectedMediaFiles(prev => 
+      prev.includes(filename) ? prev.filter(f => f !== filename) : [...prev, filename]
+    );
+  };
+
+  const handleBulkDeleteMedia = async () => {
+    if (selectedMediaFiles.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedMediaFiles.length} files?`)) return;
+    
+    setMediaLoading(true);
+    try {
+      for (const filename of selectedMediaFiles) {
+        await api.deleteMedia(filename);
+      }
+      alert('Selected files deleted successfully.');
+      setSelectedMediaFiles([]);
+      loadMediaItems();
+    } catch (err) {
+      alert('Delete failed: ' + err.message);
+    } finally {
+      setMediaLoading(false);
+    }
   };
 
   // Group orders by date for the past 7 days to calculate daily sales trends
@@ -1109,6 +1460,15 @@ function App() {
   const getFilteredProducts = () => {
     let result = [...products];
 
+    if (productSearchQuery.trim()) {
+      const q = productSearchQuery.trim().toLowerCase();
+      result = result.filter(p =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.category || '').toLowerCase().includes(q) ||
+        String(p.id) === q
+      );
+    }
+
     if (productCategoryFilter !== 'All') {
       result = result.filter(p => p.category === productCategoryFilter);
     }
@@ -1124,21 +1484,26 @@ function App() {
     return result;
   };
 
-  // Coupon submissions
+  // Coupon submissions (create or update)
   const handleCouponSubmit = async (e) => {
     e.preventDefault();
     try {
-      await api.createCoupon({
+      const payload = {
         code: couponForm.code,
         discount_type: couponForm.discount_type,
         discount_value: parseFloat(couponForm.discount_value),
         min_purchase: parseFloat(couponForm.min_purchase || 0),
-        active: 1,
         expiry_date: couponForm.expiry_date || null,
         usage_limit: couponForm.usage_limit ? parseInt(couponForm.usage_limit, 10) : null,
         category: couponForm.category !== 'All' ? couponForm.category : null
-      });
+      };
+      if (editingCoupon) {
+        await api.updateCoupon(editingCoupon.id, payload);
+      } else {
+        await api.createCoupon({ ...payload, active: 1 });
+      }
       setShowCouponModal(false);
+      setEditingCoupon(null);
       setCouponForm({
         code: '',
         discount_type: 'percentage',
@@ -1154,6 +1519,34 @@ function App() {
     }
   };
 
+  const openEditCouponModal = (coupon) => {
+    setEditingCoupon(coupon);
+    setCouponForm({
+      code: coupon.code || '',
+      discount_type: coupon.discount_type || 'percentage',
+      discount_value: coupon.discount_value !== undefined ? String(coupon.discount_value) : '',
+      min_purchase: coupon.min_purchase ? String(coupon.min_purchase) : '',
+      expiry_date: coupon.expiry_date ? coupon.expiry_date.split('T')[0] : '',
+      usage_limit: coupon.usage_limit ? String(coupon.usage_limit) : '',
+      category: coupon.category || 'All'
+    });
+    setShowCouponModal(true);
+  };
+
+  const closeCouponModal = () => {
+    setShowCouponModal(false);
+    setEditingCoupon(null);
+  };
+
+  const handleToggleCouponActive = async (coupon) => {
+    try {
+      const res = await api.updateCoupon(coupon.id, { active: coupon.active ? 0 : 1 });
+      setCoupons(coupons.map(c => c.id === coupon.id ? { ...c, active: res.coupon?.active ?? (coupon.active ? 0 : 1) } : c));
+    } catch (err) {
+      alert('Failed to update coupon status: ' + err.message);
+    }
+  };
+
   const handleDeleteCoupon = async (id) => {
     if (!window.confirm('Are you sure you want to delete this coupon?')) return;
     try {
@@ -1161,6 +1554,44 @@ function App() {
       loadDashboardData();
     } catch (err) {
       alert('Failed to delete coupon: ' + err.message);
+    }
+  };
+
+  // Change own admin password
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (passwordForm.next.length < 6) {
+      alert('New password must be at least 6 characters long.');
+      return;
+    }
+    if (passwordForm.next !== passwordForm.confirm) {
+      alert('New password and confirmation do not match.');
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await api.changePassword(passwordForm.current, passwordForm.next);
+      setPasswordForm({ current: '', next: '', confirm: '' });
+      alert('Password changed successfully.');
+    } catch (err) {
+      alert('Failed to change password: ' + err.message);
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  // Save internal admin notes on the currently open order
+  const handleSaveOrderNotes = async () => {
+    if (!selectedOrder) return;
+    setOrderNotesSaving(true);
+    try {
+      await api.updateOrderNotes(selectedOrder.id, orderNotesDraft);
+      setOrders(orders.map(o => o.id === selectedOrder.id ? { ...o, adminNotes: orderNotesDraft } : o));
+      setSelectedOrder({ ...selectedOrder, adminNotes: orderNotesDraft });
+    } catch (err) {
+      alert('Failed to save order notes: ' + err.message);
+    } finally {
+      setOrderNotesSaving(false);
     }
   };
 
@@ -1625,7 +2056,7 @@ function App() {
         </div>
         <div className="header-user">
           <img
-            src={user?.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user?.name || 'Admin')}`}
+            src={getImageUrl(user?.dp) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user?.name || 'Admin')}`}
             alt="Admin Avatar"
             style={{
               width: '32px',
@@ -1643,6 +2074,46 @@ function App() {
             <div className="user-email" style={{ fontWeight: 'bold' }}>{user?.name || 'Admin'}</div>
             <div className="user-role">{user?.email}</div>
           </div>
+          <button 
+            onClick={() => setIsActivitySidebarOpen(!isActivitySidebarOpen)} 
+            className="secondary-btn" 
+            style={{ 
+              position: 'relative', 
+              padding: '8px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-secondary)',
+              cursor: 'pointer',
+              marginRight: '12px',
+              borderRadius: '4px',
+              height: '36px',
+              width: '36px'
+            }}
+            title="Activity Feed"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            {liveActivities.length > 0 && (
+              <span style={{
+                position: 'absolute',
+                top: '-4px',
+                right: '-4px',
+                background: '#ff4d4f',
+                color: '#fff',
+                borderRadius: '50%',
+                fontSize: '8px',
+                fontWeight: 'bold',
+                padding: '2px 5px',
+                lineHeight: 1
+              }}>
+                {liveActivities.length}
+              </span>
+            )}
+          </button>
           <button onClick={handleLogout} className="logout-btn">
             Log Out
           </button>
@@ -1763,6 +2234,16 @@ function App() {
             Product Reviews
           </button>
           <button
+            onClick={() => { setActiveTab('activity'); refreshActivityLog(); }}
+            className={`sidebar-btn ${activeTab === 'activity' ? 'active' : ''}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            Activity Log
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`sidebar-btn ${activeTab === 'settings' ? 'active' : ''}`}
           >
@@ -1799,6 +2280,34 @@ function App() {
                 const lowStockItemsCount = products.filter(p => p.stock !== undefined && p.stock < 10).length;
                 const chartData = getSalesChartData();
                 const maxSales = Math.max(...chartData.map(d => d.sales), 100);
+                
+                const chartWidth = 500;
+                const chartHeight = 130;
+                const points = chartData.map((d, i) => {
+                  const x = 25 + (i * (chartWidth - 50)) / 6;
+                  const y = chartHeight - (d.sales / maxSales) * (chartHeight - 40) - 20;
+                  return { x, y, ...d };
+                });
+
+                const getLinePath = (pts) => {
+                  if (pts.length === 0) return '';
+                  let path = `M ${pts[0].x} ${pts[0].y}`;
+                  for (let i = 0; i < pts.length - 1; i++) {
+                    const p0 = pts[i];
+                    const p1 = pts[i + 1];
+                    const cpX1 = p0.x + (p1.x - p0.x) / 2;
+                    const cpY1 = p0.y;
+                    const cpX2 = p0.x + (p1.x - p0.x) / 2;
+                    const cpY2 = p1.y;
+                    path += ` C ${cpX1} ${cpY1}, ${cpX2} ${cpY2}, ${p1.x} ${p1.y}`;
+                  }
+                  return path;
+                };
+
+                const linePath = getLinePath(points);
+                const areaPath = points.length > 0 
+                  ? `${linePath} L ${points[points.length - 1].x} ${chartHeight} L ${points[0].x} ${chartHeight} Z`
+                  : '';
 
                 return (
                   <div>
@@ -1876,78 +2385,123 @@ function App() {
                     <div className="dashboard-charts-grid">
                       
                       {/* Sales Trend SVG Chart */}
-                      <div className="welcome-banner" style={{ margin: 0, padding: '24px' }}>
+                      <div className="welcome-banner" style={{ margin: 0, padding: '24px', position: 'relative' }}>
                         <h2 className="welcome-title" style={{ fontSize: '16px', marginBottom: '4px' }}>Daily Sales Trend (Last 7 Days)</h2>
                         <p className="welcome-desc" style={{ marginBottom: '24px', fontSize: '12px' }}>Visual overview of recent checkout transactions</p>
-                        <div className="chart-container" style={{ position: 'relative', height: '200px', width: '100%' }}>
-                          <svg width="100%" height="180" style={{ overflow: 'visible' }}>
-                            {/* Grid lines */}
+                        
+                        <div className="chart-container" style={{ position: 'relative', height: '180px', width: '100%' }}>
+                          {hoveredPoint && (
+                            <div style={{
+                              position: 'absolute',
+                              left: `${((hoveredPoint.x) / 500) * 100}%`,
+                              top: `${hoveredPoint.y - 45}px`,
+                              transform: 'translateX(-50%)',
+                              background: 'rgba(0,0,0,0.85)',
+                              backdropFilter: 'blur(8px)',
+                              color: '#fff',
+                              padding: '6px 10px',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              pointerEvents: 'none',
+                              zIndex: 10,
+                              border: '1px solid rgba(255,255,255,0.2)',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              <div style={{ fontWeight: 'bold' }}>{hoveredPoint.date}</div>
+                              <div>Sales: <span style={{ color: '#10b981', fontWeight: 'bold' }}>${hoveredPoint.sales.toFixed(2)}</span></div>
+                              <div>Orders: <strong>{hoveredPoint.count}</strong></div>
+                            </div>
+                          )}
+
+                          <svg width="100%" height="100%" viewBox="0 0 500 150" style={{ overflow: 'visible' }}>
+                            <defs>
+                              <linearGradient id="neon-glow-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+                                <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                              </linearGradient>
+                              <filter id="neon-glow-glow" x="-20%" y="-20%" width="140%" height="140%">
+                                <feGaussianBlur stdDeviation="3" result="blur" />
+                                <feMerge>
+                                  <feMergeNode in="blur" />
+                                  <feMergeNode in="SourceGraphic" />
+                                </feMerge>
+                              </filter>
+                            </defs>
+
+                            {/* Horizontal Grid lines */}
                             {[0, 0.25, 0.5, 0.75, 1].map((ratio, idx) => (
                               <line
                                 key={idx}
-                                x1="0%"
-                                y1={`${100 - ratio * 100}%`}
-                                x2="100%"
-                                y2={`${100 - ratio * 100}%`}
+                                x1="0"
+                                y1={chartHeight - ratio * (chartHeight - 40) - 20}
+                                x2="500"
+                                y2={chartHeight - ratio * (chartHeight - 40) - 20}
                                 stroke="var(--border-color)"
-                                strokeWidth="1"
+                                strokeWidth="0.5"
                                 strokeDasharray="4 4"
                               />
                             ))}
-                            {/* Bars */}
-                            {chartData.map((d, idx) => {
-                              const barWidthPercent = 8;
-                              const spacing = 100 / 7;
-                              const xPos = idx * spacing + (spacing - barWidthPercent) / 2;
-                              const barHeight = (d.sales / maxSales) * 140;
-                              const yPos = 160 - barHeight;
 
-                              return (
-                                <g key={idx}>
-                                  <text
-                                    x={`${xPos + barWidthPercent / 2}%`}
-                                    y={yPos - 12}
-                                    textAnchor="middle"
-                                    fill="var(--text-primary)"
-                                    fontSize="10"
-                                    fontWeight="700"
-                                    className="chart-tooltip"
-                                    style={{ opacity: 0, transition: 'opacity 0.2s', pointerEvents: 'none' }}
-                                  >
-                                    ${d.sales.toFixed(0)} ({d.count})
-                                  </text>
-                                  <rect
-                                    x={`${xPos}%`}
-                                    y={yPos}
-                                    width={`${barWidthPercent}%`}
-                                    height={barHeight}
-                                    fill="var(--text-primary)"
-                                    rx="0"
-                                    style={{ cursor: 'pointer', transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)' }}
-                                    onMouseEnter={(e) => {
-                                      e.target.style.fill = 'var(--text-secondary)';
-                                      e.target.parentNode.querySelector('.chart-tooltip').style.opacity = 1;
-                                    }}
-                                    onMouseLeave={(e) => {
-                                      e.target.style.fill = 'var(--text-primary)';
-                                      e.target.parentNode.querySelector('.chart-tooltip').style.opacity = 0;
-                                    }}
-                                  />
-                                  <text
-                                    x={`${xPos + barWidthPercent / 2}%`}
-                                    y="176"
-                                    textAnchor="middle"
-                                    fill="var(--text-secondary)"
-                                    fontSize="9"
-                                    fontWeight="700"
-                                    letterSpacing="0.5"
-                                    style={{ textTransform: 'uppercase' }}
-                                  >
-                                    {d.dateStr}
-                                  </text>
-                                </g>
-                              );
-                            })}
+                            {/* Area Gradient Fill */}
+                            {areaPath && (
+                              <path
+                                d={areaPath}
+                                fill="url(#neon-glow-grad)"
+                              />
+                            )}
+
+                            {/* Glowing Neon Line */}
+                            {linePath && (
+                              <path
+                                d={linePath}
+                                fill="transparent"
+                                stroke="#10b981"
+                                strokeWidth="2.5"
+                                filter="url(#neon-glow-glow)"
+                              />
+                            )}
+
+                            {/* Circle Nodes & Hover Interactions */}
+                            {points.map((p, idx) => (
+                              <g key={idx}>
+                                <circle
+                                  cx={p.x}
+                                  cy={p.y}
+                                  r="4"
+                                  fill="#10b981"
+                                  stroke="#fff"
+                                  strokeWidth="2"
+                                  style={{ filter: 'drop-shadow(0px 0px 4px #10b981)' }}
+                                />
+                                <circle
+                                  cx={p.x}
+                                  cy={p.y}
+                                  r="15"
+                                  fill="transparent"
+                                  style={{ cursor: 'pointer' }}
+                                  onMouseEnter={() => setHoveredPoint({ x: p.x, y: p.y, date: p.dateStr, sales: p.sales, count: p.count })}
+                                  onMouseLeave={() => setHoveredPoint(null)}
+                                />
+                              </g>
+                            ))}
+
+                            {/* X Axis Date Strings */}
+                            {points.map((p, idx) => (
+                              <text
+                                key={idx}
+                                x={p.x}
+                                y="142"
+                                textAnchor="middle"
+                                fill="var(--text-secondary)"
+                                fontSize="8"
+                                fontWeight="700"
+                                letterSpacing="0.5"
+                                style={{ textTransform: 'uppercase' }}
+                              >
+                                {p.dateStr.split(' ')[1] ? p.dateStr : p.dateStr.split('-').slice(1).join('/')}
+                              </text>
+                            ))}
                           </svg>
                         </div>
                       </div>
@@ -1993,38 +2547,66 @@ function App() {
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
                               <div style={{ position: 'relative', width: '100px', height: '100px', marginBottom: '16px' }}>
                                 <svg width="100%" height="100%" viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)', overflow: 'visible' }}>
-                                  {donutElements.map((d, idx) => (
-                                    <circle
-                                      key={idx}
-                                      cx="50"
-                                      cy="50"
-                                      r="40"
-                                      fill="transparent"
-                                      stroke={d.color}
-                                      strokeWidth="8"
-                                      strokeDasharray={d.dashArray}
-                                      strokeDashoffset={d.dashOffset}
-                                      style={{ transition: 'stroke-width 0.2s', cursor: 'pointer' }}
-                                      onMouseEnter={(e) => e.target.setAttribute('stroke-width', '11')}
-                                      onMouseLeave={(e) => e.target.setAttribute('stroke-width', '8')}
-                                    />
-                                  ))}
+                                  {donutElements.map((d, idx) => {
+                                    const percent = d.sales / totalCatSales;
+                                    return (
+                                      <circle
+                                        key={idx}
+                                        cx="50"
+                                        cy="50"
+                                        r="40"
+                                        fill="transparent"
+                                        stroke={d.color}
+                                        strokeWidth="8"
+                                        strokeDasharray={d.dashArray}
+                                        strokeDashoffset={d.dashOffset}
+                                        style={{ transition: 'stroke-width 0.2s', cursor: 'pointer' }}
+                                        onMouseEnter={(e) => {
+                                          e.target.setAttribute('stroke-width', '11');
+                                          setHoveredCategory({ name: d.name, percentage: percent, sales: d.sales });
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.target.setAttribute('stroke-width', '8');
+                                          setHoveredCategory(null);
+                                        }}
+                                      />
+                                    );
+                                  })}
                                   <circle cx="50" cy="50" r="32" fill="var(--bg-secondary)" />
                                 </svg>
-                                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
-                                  <div style={{ fontSize: '8px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total</div>
-                                  <div style={{ fontSize: '12px', fontWeight: 'bold', letterSpacing: '-0.5px' }}>${totalCatSales.toFixed(0)}</div>
+                                <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', pointerEvents: 'none', width: '60px' }}>
+                                  {hoveredCategory ? (
+                                    <>
+                                      <div style={{ fontSize: '7px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                        {hoveredCategory.name}
+                                      </div>
+                                      <div style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '-0.5px' }}>
+                                        ${hoveredCategory.sales.toFixed(0)}
+                                      </div>
+                                      <div style={{ fontSize: '8px', color: '#10b981', fontWeight: 'bold' }}>
+                                        {(hoveredCategory.percentage * 100).toFixed(1)}%
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div style={{ fontSize: '7px', fontWeight: 'bold', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total</div>
+                                      <div style={{ fontSize: '11px', fontWeight: 'bold', letterSpacing: '-0.5px' }}>${totalCatSales.toFixed(0)}</div>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                               
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '6px', width: '100%', fontSize: '10px' }}>
-                                {donutElements.map((d, idx) => (
-                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <span style={{ width: '8px', height: '8px', background: d.color, display: 'inline-block' }}></span>
-                                    <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold' }}>{d.name}</span>
-                                    <span style={{ marginLeft: 'auto', fontWeight: 'bold' }}>${d.sales.toFixed(0)}</span>
-                                  </div>
-                                ))}
+                                {donutElements.map((d, idx) => {
+                                  const isHovered = hoveredCategory && hoveredCategory.name === d.name;
+                                  return (
+                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: hoveredCategory && !isHovered ? 0.45 : 1, transition: 'opacity 0.2s' }}>
+                                      <span style={{ width: '8px', height: '8px', background: d.color, display: 'inline-block' }}></span>
+                                      <span style={{ color: 'var(--text-secondary)', fontWeight: isHovered ? '900' : 'bold' }}>{d.name}</span>
+                                      <span style={{ marginLeft: 'auto', fontWeight: 'bold' }}>${d.sales.toFixed(0)}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
                             </div>
                           );
@@ -2253,7 +2835,7 @@ function App() {
                             {leaderboard.map((item, index) => (
                               <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '12px', borderBottom: index < leaderboard.length - 1 ? '1px solid var(--border-color)' : 'none' }}>
                                 <div style={{ fontSize: '12px', fontWeight: 'bold', minWidth: '16px', color: 'var(--text-secondary)' }}>#{index + 1}</div>
-                                {item.image && <img src={item.image} alt={item.name} style={{ width: '32px', height: '40px', objectFit: 'cover' }} />}
+                                {item.image && <img src={getImageUrl(item.image)} alt={item.name} style={{ width: '32px', height: '40px', objectFit: 'cover' }} />}
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: '12px', fontWeight: 'bold', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
                                   <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{item.qty} units sold</div>
@@ -2292,6 +2874,17 @@ function App() {
                       <div>
                         {/* Inventory Filters */}
                         <div className="filter-bar">
+                          <div style={{ flex: 1, minWidth: '180px' }}>
+                            <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Search Products</label>
+                            <input
+                              type="text"
+                              className="form-input"
+                              style={{ padding: '8px 12px' }}
+                              placeholder="Search by name, category or ID..."
+                              value={productSearchQuery}
+                              onChange={(e) => setProductSearchQuery(e.target.value)}
+                            />
+                          </div>
                           <div>
                             <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Category Filter</label>
                             <select
@@ -2338,7 +2931,7 @@ function App() {
                               {filteredProducts.map((p) => (
                                 <tr key={p.id}>
                                   <td>
-                                    <img src={p.image} alt={p.name} className="product-thumb" />
+                                    <img src={getImageUrl(p.image)} alt={p.name} className="product-thumb" />
                                   </td>
                                   <td>
                                     <div className="product-name">{p.name}</div>
@@ -2650,7 +3243,7 @@ function App() {
                               <button onClick={() => handleOpenTrackingModal(order)} className="secondary-btn" style={{ padding: '6px 12px', fontSize: '10px' }}>
                                 Update Tracking
                               </button>
-                              <button onClick={() => setSelectedOrder(order)} className="secondary-btn" style={{ padding: '6px 12px', fontSize: '10px' }}>
+                              <button onClick={() => { setSelectedOrder(order); setOrderNotesDraft(order.adminNotes || ''); }} className="secondary-btn" style={{ padding: '6px 12px', fontSize: '10px' }}>
                                 View Full Invoice & Items
                               </button>
                             </div>
@@ -2722,7 +3315,7 @@ function App() {
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <img
-                                  src={u.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name || 'User')}`}
+                                  src={getImageUrl(u.dp) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name || 'User')}`}
                                   alt={u.name}
                                   style={{
                                     width: '32px',
@@ -2824,7 +3417,22 @@ function App() {
                       <h1 className="section-title">Promo Coupons</h1>
                       <p className="section-subtitle">Manage promotional offers & checkout discounts</p>
                     </div>
-                    <button onClick={() => setShowCouponModal(true)} className="primary-btn">
+                    <button
+                      onClick={() => {
+                        setEditingCoupon(null);
+                        setCouponForm({
+                          code: '',
+                          discount_type: 'percentage',
+                          discount_value: '',
+                          min_purchase: '',
+                          expiry_date: '',
+                          usage_limit: '',
+                          category: 'All'
+                        });
+                        setShowCouponModal(true);
+                      }}
+                      className="primary-btn"
+                    >
                       + Create Coupon
                     </button>
                   </div>
@@ -2890,6 +3498,16 @@ function App() {
                             </td>
                             <td>
                               <div className="actions-cell">
+                                <button onClick={() => openEditCouponModal(c)} className="action-link">
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleToggleCouponActive(c)}
+                                  className="action-link"
+                                  style={{ color: c.active ? '#b45309' : '#15803d' }}
+                                >
+                                  {c.active ? 'Deactivate' : 'Activate'}
+                                </button>
                                 <button onClick={() => handleDeleteCoupon(c.id)} className="action-link delete">
                                   Delete
                                 </button>
@@ -3048,42 +3666,105 @@ function App() {
                           </p>
                         </div>
 
+                        <div style={{ marginBottom: '24px' }}>
+                          <span className="form-label" style={{ marginBottom: '8px', display: 'block' }}>Load Standard Size Template</span>
+                          <div style={{ display: 'flex', gap: '10px' }}>
+                            <button type="button" onClick={() => handleLoadTemplate('tops')} className="secondary-btn" style={{ padding: '8px 16px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              👕 Clothing Tops
+                            </button>
+                            <button type="button" onClick={() => handleLoadTemplate('bottoms')} className="secondary-btn" style={{ padding: '8px 16px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              👖 Clothing Bottoms
+                            </button>
+                            <button type="button" onClick={() => handleLoadTemplate('shoes')} className="secondary-btn" style={{ padding: '8px 16px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              👟 Shoes / Footwear
+                            </button>
+                          </div>
+                        </div>
+
                         <div className="form-group" style={{ marginBottom: '32px' }}>
                           <label className="form-label" style={{ marginBottom: '12px', display: 'block' }}>Size Measurements Grid</label>
                           <div className="table-container" style={{ border: '1px solid #e5e7eb', borderRadius: '4px' }}>
                             <table className="admin-table">
                               <thead>
                                 <tr>
-                                  <th style={{ width: '80px' }}>Size</th>
+                                  <th style={{ width: '40px' }}></th>
+                                  <th style={{ width: '100px' }}>Size</th>
                                   {guideFormColumns.split(',').map((c) => c.trim()).filter(Boolean).map((col, idx) => (
                                     <th key={idx}>{col}</th>
                                   ))}
+                                  <th style={{ width: '60px', textAlign: 'right' }}>Action</th>
                                 </tr>
                               </thead>
                               <tbody>
-                                {['S', 'M', 'L', 'XL', 'XXL'].map(size => {
+                                {guideFormSizes.map((size, index) => {
                                   const cols = guideFormColumns.split(',').map(c => c.trim()).filter(Boolean);
                                   return (
-                                    <tr key={size}>
-                                      <td style={{ fontWeight: 'bold' }}>{size}</td>
+                                    <tr 
+                                      key={size}
+                                      draggable
+                                      onDragStart={(e) => handleDragStart(e, index)}
+                                      onDragOver={(e) => handleDragOver(e, index)}
+                                      onDrop={(e) => handleDrop(e, index)}
+                                      style={{ cursor: 'grab' }}
+                                    >
+                                      <td style={{ color: 'var(--text-muted)', fontSize: '14px', cursor: 'grab', width: '40px', paddingRight: '0', textAlign: 'center' }}>⠿</td>
+                                      <td style={{ fontWeight: 'bold', fontSize: '13px' }}>{size}</td>
                                       {cols.map((_, colIndex) => (
-                                        <td key={colIndex}>
+                                        <td key={colIndex} style={{ padding: '4px' }}>
                                           <input
                                             required
                                             type="text"
                                             className="form-input"
-                                            style={{ padding: '8px 12px', fontSize: '13px', height: '36px' }}
+                                            style={{ 
+                                              padding: '8px 12px', 
+                                              fontSize: '13px', 
+                                              height: '36px',
+                                              border: '1px solid transparent',
+                                              background: 'transparent',
+                                              margin: 0
+                                            }}
+                                            onFocus={(e) => { e.target.style.border = '1px solid var(--border-color)'; e.target.style.background = '#fff'; }}
+                                            onBlur={(e) => { e.target.style.border = '1px solid transparent'; e.target.style.background = 'transparent'; }}
                                             placeholder="e.g. 38-40"
                                             value={guideFormSlots[size]?.[colIndex] || ''}
                                             onChange={(e) => handleSlotChange(size, colIndex, e.target.value)}
                                           />
                                         </td>
                                       ))}
+                                      <td style={{ textAlign: 'right' }}>
+                                        <button 
+                                          type="button" 
+                                          onClick={() => handleRemoveSizeRow(size)}
+                                          style={{ background: 'transparent', border: 'none', color: '#ff4d4f', fontSize: '16px', cursor: 'pointer', padding: '0 8px' }}
+                                        >
+                                          &times;
+                                        </button>
+                                      </td>
                                     </tr>
                                   );
                                 })}
                               </tbody>
                             </table>
+                          </div>
+
+                          {/* Row Adder */}
+                          <div style={{ display: 'flex', gap: '8px', marginTop: '12px', alignItems: 'center' }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              style={{ width: '150px', height: '36px', padding: '0 10px', fontSize: '12px' }}
+                              placeholder="New Size, e.g. XXL"
+                              value={newSizeRowText}
+                              onChange={(e) => setNewSizeRowText(e.target.value)}
+                            />
+                            <button 
+                              type="button" 
+                              onClick={handleAddSizeRow} 
+                              className="secondary-btn"
+                              style={{ height: '36px', padding: '0 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}
+                            >
+                              + Add Row
+                            </button>
                           </div>
                         </div>
 
@@ -3314,6 +3995,66 @@ function App() {
                 </div>
               )}
 
+              {/* Tab: Admin Activity Log */}
+              {activeTab === 'activity' && (
+                <div>
+                  <div className="section-title-wrapper">
+                    <div>
+                      <h1 className="section-title">Activity Log</h1>
+                      <p className="section-subtitle">Audit trail of recent admin actions across the store</p>
+                    </div>
+                    <button onClick={refreshActivityLog} className="secondary-btn">
+                      Refresh
+                    </button>
+                  </div>
+
+                  {activityLoading ? (
+                    <div className="loading-container">
+                      <div className="spinner"></div>
+                    </div>
+                  ) : (
+                    <div className="table-container">
+                      <table className="admin-table">
+                        <thead>
+                          <tr>
+                            <th>Time</th>
+                            <th>Admin</th>
+                            <th>Action</th>
+                            <th>Details</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activityLog.map((entry) => (
+                            <tr key={entry.id}>
+                              <td>
+                                <div style={{ fontSize: '12px', fontWeight: '600' }}>{new Date(entry.created_at).toLocaleTimeString()}</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{new Date(entry.created_at).toLocaleDateString()}</div>
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: '600', fontSize: '13px' }}>{entry.actor_name}</div>
+                              </td>
+                              <td>
+                                <span className="category-tag">{entry.action}</span>
+                              </td>
+                              <td>
+                                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.detail}</div>
+                              </td>
+                            </tr>
+                          ))}
+                          {activityLog.length === 0 && (
+                            <tr>
+                              <td colSpan="4" style={{ fontStyle: 'italic', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                                No admin activity recorded yet. Actions like product edits, order updates and coupon changes will appear here.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Tab: Site Settings Panel */}
               {activeTab === 'settings' && (
                 <div>
@@ -3324,7 +4065,41 @@ function App() {
                     </div>
                   </div>
 
-                  <form onSubmit={handleSettingsSubmit} className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', borderBottom: '1px solid #e5e7eb', paddingBottom: '8px' }}>
+                    <button 
+                      type="button" 
+                      onClick={() => setSettingsSubTab('general')} 
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: settingsSubTab === 'general' ? '2px solid var(--text-primary)' : '2px solid transparent',
+                        padding: '8px 16px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        color: settingsSubTab === 'general' ? 'var(--text-primary)' : 'var(--text-muted)'
+                      }}
+                    >
+                      General Settings
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => { setSettingsSubTab('media'); loadMediaItems(); }} 
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        borderBottom: settingsSubTab === 'media' ? '2px solid var(--text-primary)' : '2px solid transparent',
+                        padding: '8px 16px',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        color: settingsSubTab === 'media' ? 'var(--text-primary)' : 'var(--text-muted)'
+                      }}
+                    >
+                      Media Library
+                    </button>
+                  </div>
+
+                  {settingsSubTab === 'general' ? (
+                    <form onSubmit={handleSettingsSubmit} className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
                     <h2 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '20px', borderBottom: '1px solid #f3f4f6', paddingBottom: '10px' }}>General Branding</h2>
                     
                     <div className="grid-3col">
@@ -3389,6 +4164,16 @@ function App() {
                           value={siteSettings.hero_image}
                           onChange={(e) => setSiteSettings({ ...siteSettings, hero_image: e.target.value })}
                         />
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          style={{ height: '44px', fontWeight: 'bold', margin: 0, padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                          onClick={() => handleOpenMediaPicker((selectedUrl) => {
+                            setSiteSettings(prev => ({ ...prev, hero_image: selectedUrl }));
+                          })}
+                        >
+                          Choose from Library
+                        </button>
                         <div style={{ position: 'relative' }}>
                           <input
                             type="file"
@@ -3518,6 +4303,166 @@ function App() {
                       </button>
                     </div>
                   </form>
+                  ) : (
+                    <div className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+                      <style>{`
+                        .media-card:hover .media-actions-overlay {
+                          opacity: 1 !important;
+                        }
+                        .media-card:hover .media-thumb {
+                          transform: scale(1.04);
+                        }
+                      `}</style>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+                        <div>
+                          <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: 0 }}>Media Library & Assets</h2>
+                          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>Upload, preview, copy URLs, or delete your brand and product images.</p>
+                        </div>
+                        
+                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                          {selectedMediaFiles.length > 0 && (
+                            <button 
+                              type="button" 
+                              onClick={handleBulkDeleteMedia} 
+                              className="secondary-btn"
+                              style={{ borderColor: '#ff4d4f', color: '#ff4d4f', fontWeight: 'bold' }}
+                            >
+                              Delete Selected ({selectedMediaFiles.length})
+                            </button>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="settings-media-upload"
+                            style={{ display: 'none' }}
+                            onChange={handleMediaUpload}
+                            multiple
+                          />
+                          <label
+                            htmlFor="settings-media-upload"
+                            className="primary-btn"
+                            style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                              <polyline points="17 8 12 3 7 8" />
+                              <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            {mediaUploadLoading ? 'Uploading...' : 'Upload Files'}
+                          </label>
+                        </div>
+                      </div>
+
+                      {mediaLoading ? (
+                        <div className="loading-container">
+                          <div className="spinner"></div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                            gap: '20px'
+                          }}>
+                            {mediaList.map((item, idx) => {
+                              const isSelected = selectedMediaFiles.includes(item.filename);
+                              const fileUrl = getImageUrl(`/uploads/${item.filename}`);
+                              return (
+                                <div 
+                                  key={idx}
+                                  style={{
+                                    position: 'relative',
+                                    background: 'rgba(255, 255, 255, 0.4)',
+                                    backdropFilter: 'blur(10px)',
+                                    border: isSelected ? '2px solid var(--text-primary)' : '1px solid var(--border-color)',
+                                    padding: '8px',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '8px',
+                                    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    boxShadow: isSelected ? '0 12px 24px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.02)'
+                                  }}
+                                  className="media-card"
+                                >
+                                  <div style={{ position: 'relative', aspectRatio: '1', overflow: 'hidden', background: '#f9fafb', borderRadius: '4px' }}>
+                                    <img 
+                                      src={fileUrl} 
+                                      alt={item.filename}
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s' }}
+                                      className="media-thumb"
+                                    />
+                                    
+                                    {/* Selection Checkbox */}
+                                    <div style={{ position: 'absolute', top: '8px', left: '8px', zIndex: 10 }}>
+                                      <input 
+                                        type="checkbox" 
+                                        checked={isSelected}
+                                        onChange={() => handleToggleMediaSelect(item.filename)}
+                                        style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#000' }}
+                                      />
+                                    </div>
+
+                                    {/* Action Buttons overlay */}
+                                    <div 
+                                      style={{ 
+                                        position: 'absolute', 
+                                        top: 0, left: 0, right: 0, bottom: 0, 
+                                        background: 'rgba(0,0,0,0.45)', 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        justifyContent: 'center', 
+                                        gap: '8px',
+                                        opacity: 0,
+                                        transition: 'opacity 0.2s'
+                                      }}
+                                      className="media-actions-overlay"
+                                    >
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleCopyUrl(item.filename)}
+                                        className="primary-btn"
+                                        style={{ padding: '6px 12px', fontSize: '10px', background: '#fff', color: '#000', border: 'none' }}
+                                      >
+                                        Copy Link
+                                      </button>
+                                      <button 
+                                        type="button"
+                                        onClick={() => {
+                                          if (window.confirm('Delete this image?')) {
+                                            api.deleteMedia(item.filename).then(() => {
+                                              alert('File deleted.');
+                                              loadMediaItems();
+                                            }).catch(err => alert(err.message));
+                                          }
+                                        }}
+                                        className="primary-btn"
+                                        style={{ padding: '6px 12px', fontSize: '10px', background: '#ff4d4f', color: '#fff', border: 'none' }}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', padding: '0 4px' }}>
+                                    <div style={{ fontSize: '11px', fontWeight: 'bold', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {item.filename}
+                                    </div>
+                                    <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                                      {(item.size / 1024).toFixed(1)} KB • {new Date(item.created).toLocaleDateString()}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {mediaList.length === 0 && (
+                            <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px', padding: '60px 0', border: '1px dashed var(--border-color)' }}>
+                              No media files uploaded yet. Select files to upload.
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3536,7 +4481,7 @@ function App() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '24px', marginBottom: '32px', padding: '20px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
                       <div style={{ position: 'relative', width: '80px', height: '80px', borderRadius: '50%', overflow: 'hidden', border: '2px solid var(--border-color)', flexShrink: 0 }}>
                         <img
-                          src={profileForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileForm.name || 'Admin')}`}
+                          src={getImageUrl(profileForm.dp) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(profileForm.name || 'Admin')}`}
                           alt="Admin Avatar"
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           onError={(e) => {
@@ -3633,6 +4578,62 @@ function App() {
                     <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                       <button type="submit" disabled={profileSaving || profileUploadLoading} className="primary-btn" style={{ minWidth: '150px' }}>
                         {profileSaving ? 'Saving Profile...' : 'Save Profile Details'}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* Security: Change Password */}
+                  <form onSubmit={handleChangePassword} className="card" style={{ padding: '32px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px', maxWidth: '600px', marginTop: '24px' }}>
+                    <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: '700' }}>Change Password</h3>
+                    <p style={{ margin: '0 0 24px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>Update the password you use to sign in to the admin panel.</p>
+
+                    <div className="form-group" style={{ marginBottom: '20px' }}>
+                      <label className="form-label">Current Password</label>
+                      <input
+                        required
+                        type="password"
+                        className="form-input"
+                        placeholder="Enter your current password"
+                        autoComplete="current-password"
+                        value={passwordForm.current}
+                        onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+                        disabled={passwordSaving}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '20px' }}>
+                      <label className="form-label">New Password (min 6 characters)</label>
+                      <input
+                        required
+                        type="password"
+                        minLength={6}
+                        className="form-input"
+                        placeholder="Enter a new password"
+                        autoComplete="new-password"
+                        value={passwordForm.next}
+                        onChange={(e) => setPasswordForm({ ...passwordForm, next: e.target.value })}
+                        disabled={passwordSaving}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: '32px' }}>
+                      <label className="form-label">Confirm New Password</label>
+                      <input
+                        required
+                        type="password"
+                        minLength={6}
+                        className="form-input"
+                        placeholder="Re-enter the new password"
+                        autoComplete="new-password"
+                        value={passwordForm.confirm}
+                        onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
+                        disabled={passwordSaving}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button type="submit" disabled={passwordSaving} className="primary-btn" style={{ minWidth: '150px' }}>
+                        {passwordSaving ? 'Updating...' : 'Update Password'}
                       </button>
                     </div>
                   </form>
@@ -3750,6 +4751,25 @@ function App() {
                     <button
                       type="button"
                       className="secondary-btn"
+                      style={{ padding: '10px 16px', fontWeight: 'bold' }}
+                      onClick={() => {
+                        handleOpenMediaPicker((selectedUrl) => {
+                          setProductForm(prev => {
+                            const newImages = [...(prev.images || []), selectedUrl];
+                            return {
+                              ...prev,
+                              images: newImages,
+                              image: prev.image || newImages[0] || ''
+                            };
+                          });
+                        });
+                      }}
+                    >
+                      Choose from Library
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-btn"
                       style={{ padding: '10px 16px' }}
                       onClick={() => {
                         if (!manualImageUrl) return;
@@ -3778,7 +4798,7 @@ function App() {
                             style={{ position: 'relative', aspectRatio: '1', border: isPrimary ? '2px solid var(--text-primary)' : '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', cursor: 'pointer' }}
                             onClick={() => setProductForm(prev => ({ ...prev, image: imgUrl }))}
                           >
-                            <img src={imgUrl} alt="Thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            <img src={getImageUrl(imgUrl)} alt="Thumbnail" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                             {isPrimary && (
                               <div style={{ position: 'absolute', bottom: '0', left: '0', right: '0', background: 'var(--text-primary)', color: '#fff', fontSize: '8px', fontWeight: 'bold', textTransform: 'uppercase', textAlign: 'center', padding: '2px 0' }}>
                                 Primary
@@ -3928,7 +4948,7 @@ function App() {
                     {selectedOrder.items?.map((item, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid #f9fafb' }}>
                         <td style={{ padding: '10px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {item.image && <img src={item.image} alt="" className="hide-print" style={{ width: '28px', height: '34px', objectFit: 'cover' }} />}
+                          {item.image && <img src={getImageUrl(item.image)} alt="" className="hide-print" style={{ width: '28px', height: '34px', objectFit: 'cover' }} />}
                           <div>
                             <div style={{ fontWeight: '700', fontSize: '11px', textTransform: 'uppercase' }}>{item.name}</div>
                             <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Size: {item.size || 'M'}</span>
@@ -3943,21 +4963,71 @@ function App() {
               </div>
 
               {/* Total Invoice amount block */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '2px solid #000', paddingTop: '16px' }}>
-                <div style={{ textAlign: 'right', width: '200px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                    <span>Subtotal</span>
-                    <span>${parseFloat(selectedOrder.total || 0).toFixed(2)}</span>
+              {(() => {
+                const subtotal = selectedOrder.items?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
+                const discount = selectedOrder.discount || 0;
+                const promoCode = selectedOrder.promoCode;
+                const totalPaid = parseFloat(selectedOrder.total || 0);
+                const tax = (subtotal - discount) * 0.10; // 10% tax included in grand total
+                const calculatedShipping = Math.max(0, totalPaid - (subtotal - discount));
+
+                return (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: '2px solid #000', paddingTop: '16px', marginTop: '24px' }}>
+                    {/* Barcode on the bottom left of invoice */}
+                    <div>
+                      {renderBarcode(selectedOrder.id)}
+                    </div>
+
+                    <div style={{ textAlign: 'right', width: '220px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                        <span>Subtotal</span>
+                        <span>${subtotal.toFixed(2)}</span>
+                      </div>
+                      {discount > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#dc2626', marginBottom: '6px' }}>
+                          <span>Discount {promoCode ? `(${promoCode})` : ''}</span>
+                          <span>- ${discount.toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                        <span>Estimated Tax (10% VAT Incl.)</span>
+                        <span>${tax.toFixed(2)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                        <span>Shipping</span>
+                        <span>{calculatedShipping > 0 ? `$${calculatedShipping.toFixed(2)}` : 'Free'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: '800', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '8px', color: '#000' }}>
+                        <span>Grand Total</span>
+                        <span>${totalPaid.toFixed(2)}</span>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                    <span>Shipping</span>
-                    <span>{parseFloat(selectedOrder.total || 0) >= 200 ? 'Free' : '$15.00'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: '800', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '8px' }}>
-                    <span>Grand Total</span>
-                    <span>${parseFloat(selectedOrder.total || 0).toFixed(2)}</span>
-                  </div>
-                </div>
+                );
+              })()}
+            </div>
+
+            {/* Internal admin notes (not printed, never shown to customer) */}
+            <div className="hide-print" style={{ padding: '0 36px 24px' }}>
+              <div style={{ fontSize: '9px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '12px' }}>
+                Internal Notes (Admin Only)
+              </div>
+              <textarea
+                className="form-input"
+                style={{ width: '100%', height: '80px', padding: '10px 12px', resize: 'vertical', fontSize: '12px' }}
+                placeholder="Add private notes about this order (e.g. customer called, special packaging request)..."
+                value={orderNotesDraft}
+                onChange={(e) => setOrderNotesDraft(e.target.value)}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                <button
+                  onClick={handleSaveOrderNotes}
+                  disabled={orderNotesSaving || orderNotesDraft === (selectedOrder.adminNotes || '')}
+                  className="secondary-btn"
+                  style={{ padding: '6px 16px', fontSize: '11px' }}
+                >
+                  {orderNotesSaving ? 'Saving...' : 'Save Notes'}
+                </button>
               </div>
             </div>
 
@@ -4037,8 +5107,8 @@ function App() {
         <div className="modal-overlay">
           <div className="modal-card" style={{ maxWidth: '400px' }}>
             <div className="modal-header">
-              <h2 className="modal-title">Create Promo Coupon</h2>
-              <button onClick={() => setShowCouponModal(false)} className="modal-close">
+              <h2 className="modal-title">{editingCoupon ? `Edit Coupon: ${editingCoupon.code}` : 'Create Promo Coupon'}</h2>
+              <button onClick={closeCouponModal} className="modal-close">
                 &times;
               </button>
             </div>
@@ -4130,11 +5200,11 @@ function App() {
                 </div>
                 
                 <div className="modal-footer" style={{ padding: 0, border: 'none', marginTop: '24px' }}>
-                  <button type="button" onClick={() => setShowCouponModal(false)} className="secondary-btn">
+                  <button type="button" onClick={closeCouponModal} className="secondary-btn">
                     Cancel
                   </button>
                   <button type="submit" className="primary-btn">
-                    Create Coupon
+                    {editingCoupon ? 'Save Changes' : 'Create Coupon'}
                   </button>
                 </div>
               </form>
@@ -4477,7 +5547,7 @@ function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
                   <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
                     <img
-                      src={editUserForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(editUserForm.name || 'User')}`}
+                      src={getImageUrl(editUserForm.dp) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(editUserForm.name || 'User')}`}
                       alt="User Avatar"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => {
@@ -4591,7 +5661,7 @@ function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
                   <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
                     <img
-                      src={addAdminForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addAdminForm.name || 'Admin')}`}
+                      src={getImageUrl(addAdminForm.dp) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addAdminForm.name || 'Admin')}`}
                       alt="Admin Avatar"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => {
@@ -4721,7 +5791,7 @@ function App() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '24px', padding: '16px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '4px' }}>
                   <div style={{ width: '64px', height: '64px', borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border-color)', flexShrink: 0 }}>
                     <img
-                      src={addCustomerForm.dp || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addCustomerForm.name || 'User')}`}
+                      src={getImageUrl(addCustomerForm.dp) || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(addCustomerForm.name || 'User')}`}
                       alt="Customer Avatar"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => {
@@ -4866,24 +5936,288 @@ function App() {
                 <button onClick={dismissNotification} className="notification-btn-view" style={{ backgroundColor: '#3b82f6' }}>OK</button>
               </div>
             </>
+          ) : activeNotification.type === 'user-registered' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#10b981' }}>New Customer</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">Customer Registered!</h4>
+              <div className="notification-body">
+                <strong>{activeNotification.name}</strong> ({activeNotification.email}) has registered.
+              </div>
+              <div className="notification-actions">
+                <button onClick={handleViewNotification} className="notification-btn-view" style={{ backgroundColor: '#10b981' }}>View Customers</button>
+                <button onClick={dismissNotification} className="notification-btn-dismiss">Dismiss</button>
+              </div>
+            </>
+          ) : activeNotification.type === 'ticket-created' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#f59e0b' }}>Support Alert</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">New Support Ticket!</h4>
+              <div className="notification-body">
+                Inquiry from <strong>{activeNotification.name}</strong> ({activeNotification.email}).
+              </div>
+              <div className="notification-actions">
+                <button onClick={handleViewNotification} className="notification-btn-view" style={{ backgroundColor: '#f59e0b' }}>View Tickets</button>
+                <button onClick={dismissNotification} className="notification-btn-dismiss">Dismiss</button>
+              </div>
+            </>
+          ) : activeNotification.type === 'review-submitted' ? (
+            <>
+              <div className="notification-header">
+                <span className="notification-badge" style={{ backgroundColor: '#ec4899' }}>New Review</span>
+                <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
+              </div>
+              <h4 className="notification-title">Product Review Received!</h4>
+              <div className="notification-body">
+                <strong>{activeNotification.name}</strong> left a <strong>{activeNotification.rating}-star</strong> review.
+              </div>
+              <div className="notification-actions">
+                <button onClick={handleViewNotification} className="notification-btn-view" style={{ backgroundColor: '#ec4899' }}>View Reviews</button>
+                <button onClick={dismissNotification} className="notification-btn-dismiss">Dismiss</button>
+              </div>
+            </>
           ) : (
             <>
               <div className="notification-header">
-                <span className="notification-badge">Live Alert</span>
+                <span className="notification-badge" style={{ backgroundColor: '#3b82f6' }}>Order Alert</span>
                 <button onClick={dismissNotification} className="notification-close-btn">&times;</button>
               </div>
               <h4 className="notification-title">New Order Confirmed!</h4>
               <div className="notification-body">
-                <strong>{activeNotification.customerName}</strong> just placed order <strong>#{activeNotification.id}</strong> for <strong>${parseFloat(activeNotification.total || 0).toFixed(2)}</strong> ({activeNotification.itemsCount} {activeNotification.itemsCount === 1 ? 'item' : 'items'}).
+                <strong>{activeNotification.customerName}</strong> placed order <strong>#{activeNotification.id}</strong> for <strong>${parseFloat(activeNotification.total || 0).toFixed(2)}</strong>.
               </div>
               <div className="notification-actions">
-                <button onClick={handleViewNotificationOrder} className="notification-btn-view">View Order</button>
+                <button onClick={handleViewNotification} className="notification-btn-view" style={{ backgroundColor: '#3b82f6' }}>View Order</button>
                 <button onClick={dismissNotification} className="notification-btn-dismiss">Dismiss</button>
               </div>
             </>
           )}
         </div>
       )}
+
+      {/* Media Picker Modal */}
+      {mediaPickerMode && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-card" style={{ maxWidth: '800px', width: '90%' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">Select Asset from Library</h2>
+              <button 
+                onClick={() => { setMediaPickerMode(false); setMediaPickerCallback(null); }} 
+                className="modal-close"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>Click an image card to select and auto-fill the URL.</p>
+                <div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    id="picker-media-upload"
+                    style={{ display: 'none' }}
+                    onChange={handleMediaUpload}
+                    multiple
+                  />
+                  <label
+                    htmlFor="picker-media-upload"
+                    className="primary-btn"
+                    style={{ cursor: 'pointer', display: 'inline-block', margin: 0 }}
+                  >
+                    {mediaUploadLoading ? 'Uploading...' : 'Upload New'}
+                  </label>
+                </div>
+              </div>
+
+              {mediaLoading ? (
+                <div className="loading-container">
+                  <div className="spinner"></div>
+                </div>
+              ) : (
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', 
+                  gap: '16px',
+                  maxHeight: '350px',
+                  overflowY: 'auto',
+                  padding: '4px'
+                }}>
+                  {mediaList.map((item, idx) => (
+                    <div 
+                      key={idx}
+                      onClick={() => handleSelectMediaItem(item)}
+                      style={{
+                        position: 'relative',
+                        aspectRatio: '1',
+                        border: '1px solid var(--border-color)',
+                        background: '#fff',
+                        cursor: 'pointer',
+                        overflow: 'hidden',
+                        borderRadius: '4px',
+                        transition: 'transform 0.2s'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.03)'}
+                      onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                      <img 
+                        src={getImageUrl(`/uploads/${item.filename}`)} 
+                        alt={item.filename}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        background: 'rgba(0,0,0,0.6)',
+                        color: '#fff',
+                        fontSize: '9px',
+                        padding: '4px 6px',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>
+                        {item.filename}
+                      </div>
+                    </div>
+                  ))}
+                  {mediaList.length === 0 && (
+                    <div style={{ gridColumn: '1/-1', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', padding: '40px 0' }}>
+                      No media files found. Upload some assets first!
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button 
+                onClick={() => { setMediaPickerMode(false); setMediaPickerCallback(null); }} 
+                className="secondary-btn"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Sliding Activity Feed Sidebar */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        right: 0,
+        width: '360px',
+        height: '100vh',
+        background: 'rgba(255, 255, 255, 0.82)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        borderLeft: '1px solid var(--border-color)',
+        boxShadow: '-10px 0 30px rgba(0,0,0,0.06)',
+        transform: isActivitySidebarOpen ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+        zIndex: 999,
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '24px',
+        boxSizing: 'border-box'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+          <div>
+            <h3 style={{ fontSize: '14px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '-0.3px', margin: 0, color: 'var(--text-primary)' }}>Live Activity Feed</h3>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Real-time event stream ticker</span>
+          </div>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button 
+              onClick={() => setLiveActivities([])} 
+              style={{ background: 'transparent', border: 'none', color: '#ff4d4f', fontSize: '9px', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'pointer', letterSpacing: '0.5px', padding: 0 }}
+            >
+              Clear Feed
+            </button>
+            <button 
+              onClick={() => setIsActivitySidebarOpen(false)} 
+              style={{ background: 'transparent', border: 'none', fontSize: '20px', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0, lineHeight: 1 }}
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px', paddingRight: '4px' }}>
+          {liveActivities.map((act) => {
+            const actTime = (() => {
+              try {
+                return new Date(act.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              } catch {
+                return '';
+              }
+            })();
+            return (
+              <div 
+                key={act.id} 
+                onClick={() => {
+                  if (act.type === 'new-order') {
+                    setActiveTab('orders');
+                    setOrderSearchQuery(act.idRef || '');
+                  } else if (act.type === 'user-registered') {
+                    setActiveTab('users');
+                  } else if (act.type === 'ticket-created') {
+                    setActiveTab('support');
+                  } else if (act.type === 'review-submitted') {
+                    setActiveTab('reviews');
+                  }
+                  setIsActivitySidebarOpen(false);
+                }}
+                style={{ 
+                  background: 'rgba(255, 255, 255, 0.45)', 
+                  border: '1px solid rgba(0, 0, 0, 0.05)', 
+                  padding: '10px', 
+                  display: 'flex', 
+                  gap: '10px',
+                  alignItems: 'flex-start',
+                  cursor: 'pointer',
+                  borderRadius: '4px',
+                  transition: 'background 0.2s'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.8)'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.45)'}
+              >
+                <div style={{ 
+                  width: '28px', 
+                  height: '28px', 
+                  background: act.color, 
+                  color: '#fff', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  fontSize: '12px',
+                  flexShrink: 0
+                }}>
+                  {act.icon}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-primary)' }}>{act.name}</span>
+                    <span style={{ fontSize: '8px', color: 'var(--text-muted)' }}>{actTime}</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--text-secondary)', lineHeight: '1.3' }}>{act.message}</div>
+                </div>
+              </div>
+            );
+          })}
+          {liveActivities.length === 0 && (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px', padding: '40px 0', fontStyle: 'italic' }}>
+              No activities logged yet.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
