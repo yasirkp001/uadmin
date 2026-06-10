@@ -891,15 +891,31 @@ body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none; /* Firefox */
-    padding-bottom: 0px;
+    padding: 8px 16px;
+    gap: 8px;
+    background: var(--bg-tertiary);
+    border: none;
     border-bottom: 1px solid var(--border-color);
+    box-sizing: border-box;
   }
   .sidebar::-webkit-scrollbar {
     display: none; /* Safari and Chrome */
   }
   .sidebar-btn {
     white-space: nowrap;
-    padding: 10px 14px;
+    border-radius: 20px;
+    padding: 8px 14px;
+    font-size: 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    gap: 6px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar-btn.active {
+    background: var(--text-primary);
+    color: #fff;
+    border-color: var(--text-primary);
+    transform: scale(1.02);
   }
   .dashboard-header {
     padding: 16px 24px;
@@ -967,25 +983,56 @@ body {
   .modal-body {
     padding: 20px;
   }
+  .welcome-banner {
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .order-card {
+    padding: 16px;
+  }
+  .order-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .order-meta-right {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
 }
 
 @media (max-width: 640px) {
   .dashboard-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 14px 16px;
-  }
-  .header-user {
-    width: 100%;
+    flex-direction: row;
+    align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    padding: 12px 16px;
+    gap: 8px;
+  }
+  .header-brand {
+    gap: 6px;
   }
   .brand-logo {
-    font-size: 18px;
+    font-size: 16px;
+  }
+  .brand-badge {
+    font-size: 8px;
+    padding: 1px 4px;
+    letter-spacing: 0.5px;
+  }
+  .header-user {
+    width: auto;
+    gap: 12px;
   }
   .user-info {
-    font-size: 12px;
+    display: none; /* Hide admin name/email text to save space on mobile */
+  }
+  .logout-btn {
+    padding: 6px 10px;
+    font-size: 9px;
+    letter-spacing: 0.5px;
   }
   .dashboard-layout {
     padding: 12px;
@@ -1003,6 +1050,34 @@ body {
   .filter-bar {
     flex-direction: column;
     gap: 12px;
+  }
+  .welcome-actions {
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+  .welcome-actions button {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+  .modal-footer {
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+  .modal-footer button {
+    width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+}
+
+@media (hover: hover) {
+  .stat-card:hover {
+    transform: translateY(-2px);
+    box-sizing: border-box;
+    box-shadow: var(--shadow-md);
   }
 }
 
