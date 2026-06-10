@@ -2383,6 +2383,17 @@ function App() {
             User Accounts
           </button>
           <button
+            onClick={() => setActiveTab('carts')}
+            className={`sidebar-btn ${activeTab === 'carts' ? 'active' : ''}`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="9" cy="21" r="1" />
+              <circle cx="20" cy="21" r="1" />
+              <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+            </svg>
+            Live Carts
+          </button>
+          <button
             onClick={() => setActiveTab('coupons')}
             className={`sidebar-btn ${activeTab === 'coupons' ? 'active' : ''}`}
           >
@@ -2814,6 +2825,29 @@ function App() {
                       </div>
                     </div>
 
+                    {/* Recent Admin Activity */}
+                    {activityLog.length > 0 && (
+                      <div style={{ background: '#fff', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '24px', marginBottom: '24px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                          <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Recent Admin Activity</h3>
+                          <button onClick={() => { setActiveTab('activity'); refreshActivityLog(); }} className="secondary-btn" style={{ padding: '6px 14px', fontSize: '11px', margin: 0 }}>
+                            View All
+                          </button>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {activityLog.slice(0, 5).map((entry) => (
+                            <div key={entry.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', paddingBottom: '12px', borderBottom: '1px solid var(--bg-secondary)' }}>
+                              <span className="category-tag" style={{ flexShrink: 0 }}>{entry.action}</span>
+                              <span style={{ fontSize: '12px', color: 'var(--text-secondary)', flex: 1 }}>{entry.detail}</span>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', flexShrink: 0 }}>
+                                {new Date(entry.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="welcome-banner">
                       <h2 className="welcome-title">Welcome to the Administrator Hub</h2>
                       <p className="welcome-desc">
@@ -3064,9 +3098,14 @@ function App() {
                         <h1 className="section-title">Products Catalog</h1>
                         <p className="section-subtitle">Manage store products & collections</p>
                       </div>
-                      <button onClick={openAddModal} className="primary-btn">
-                        + Add Product
-                      </button>
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <button onClick={exportProductsToCSV} className="secondary-btn" style={{ margin: 0 }}>
+                          Export Products (CSV)
+                        </button>
+                        <button onClick={openAddModal} className="primary-btn">
+                          + Add Product
+                        </button>
+                      </div>
                     </div>
 
                     <div className="products-catalog-grid">
@@ -3188,6 +3227,9 @@ function App() {
                                       </a>
                                       <button onClick={() => openEditModal(p)} className="action-link">
                                         Edit
+                                      </button>
+                                      <button onClick={() => handleDuplicateProduct(p)} className="action-link">
+                                        Duplicate
                                       </button>
                                       <button onClick={() => handleDeleteProduct(p.id)} className="action-link delete">
                                         Delete
@@ -3493,6 +3535,20 @@ function App() {
                     </div>
                   </div>
 
+                  <div className="filter-bar" style={{ marginBottom: '16px' }}>
+                    <div style={{ flex: 1, minWidth: '220px' }}>
+                      <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Search Users</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ padding: '8px 12px' }}
+                        placeholder="Search by name, email or phone..."
+                        value={userSearchQuery}
+                        onChange={(e) => setUserSearchQuery(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
                   <div className="table-container">
                     <table className="admin-table">
                       <thead>
@@ -3507,7 +3563,13 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {users.map((u) => (
+                        {users.filter((u) => {
+                          if (!userSearchQuery.trim()) return true;
+                          const q = userSearchQuery.trim().toLowerCase();
+                          return (u.name || '').toLowerCase().includes(q) ||
+                            (u.email || '').toLowerCase().includes(q) ||
+                            (u.phone || '').toLowerCase().includes(q);
+                        }).map((u) => (
                           <tr key={u.id}>
                             <td style={{ fontFamily: 'var(--mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
                               #{u.id}
@@ -3599,10 +3661,94 @@ function App() {
                                     {u.is_active !== 0 ? 'Block' : 'Unblock'}
                                   </button>
                                 )}
+                                {u.role !== 'admin' && (
+                                  <button onClick={() => handleDeleteUser(u)} className="action-link delete">
+                                    Delete
+                                  </button>
+                                )}
                               </div>
                             </td>
                           </tr>
                         ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: Live Customer Carts */}
+              {activeTab === 'carts' && (
+                <div>
+                  <div className="section-title-wrapper">
+                    <div>
+                      <h1 className="section-title">Live Customer Carts</h1>
+                      <p className="section-subtitle">Items customers have added but not yet checked out — potential revenue</p>
+                    </div>
+                    <button onClick={loadDashboardData} className="secondary-btn">
+                      Refresh
+                    </button>
+                  </div>
+
+                  {/* Potential revenue summary */}
+                  <div className="stats-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+                    <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)' }}>Active Carts</div>
+                      <div style={{ fontSize: '24px', fontWeight: '800', marginTop: '6px' }}>{liveCarts.length}</div>
+                    </div>
+                    <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)' }}>Items in Carts</div>
+                      <div style={{ fontSize: '24px', fontWeight: '800', marginTop: '6px' }}>{liveCarts.reduce((sum, c) => sum + c.item_count, 0)}</div>
+                    </div>
+                    <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '20px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)' }}>Potential Revenue</div>
+                      <div style={{ fontSize: '24px', fontWeight: '800', marginTop: '6px', color: '#15803d' }}>${liveCarts.reduce((sum, c) => sum + c.total_value, 0).toFixed(2)}</div>
+                    </div>
+                  </div>
+
+                  <div className="table-container">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Customer</th>
+                          <th>Cart Contents</th>
+                          <th>Items</th>
+                          <th>Cart Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveCarts.map((cart) => (
+                          <tr key={cart.user_id}>
+                            <td>
+                              <div style={{ fontWeight: '600' }}>{cart.name}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{cart.email}</div>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {cart.items.map((item, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {item.image && <img src={getImageUrl(item.image)} alt="" style={{ width: '24px', height: '30px', objectFit: 'cover', borderRadius: '2px' }} />}
+                                    <span style={{ fontSize: '12px' }}>
+                                      {item.name} <span style={{ color: 'var(--text-muted)' }}>(Size {item.size} × {item.quantity})</span>
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: '700' }}>{cart.item_count}</div>
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: '700' }}>${cart.total_value.toFixed(2)}</div>
+                            </td>
+                          </tr>
+                        ))}
+                        {liveCarts.length === 0 && (
+                          <tr>
+                            <td colSpan="4" style={{ fontStyle: 'italic', textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                              No customers have items in their carts right now.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
