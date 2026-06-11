@@ -2092,6 +2092,11 @@ function App() {
       ? productForm.images 
       : (productForm.image ? [productForm.image] : []);
     
+    if (finalImages.length === 0) {
+      alert('Failed to save product: Please provide at least one product image.');
+      return;
+    }
+
     const sizesArray = productForm.sizes
       ? productForm.sizes.split(',').map(s => s.trim()).filter(Boolean)
       : ['S', 'M', 'L', 'XL', 'XXL'];
@@ -2101,6 +2106,7 @@ function App() {
       price: parseFloat(productForm.price),
       details: detailsArray,
       images: finalImages,
+      image: finalImages[0], // Ensure image is set to the first image
       stock: parseInt(productForm.stock, 10) || 0,
       sizes: sizesArray
     };
